@@ -1,6 +1,9 @@
 import os
 import json
 import anthropic
+from dotenv import load_dotenv
+
+load_dotenv()
 
 client = anthropic.Anthropic()
 
@@ -65,12 +68,13 @@ def run_agent(user_message: str):
         print(f"  Messages in history: {len(messages)}")
 
         response = client.messages.create(
-            model=os.getenv("MODEL_ID", "claude-sonnet-4-20250514"),
+            model=os.getenv("MODEL_ID", "claude-sonnet-4-6"),
             max_tokens=1024,
             tools=tools,
             messages=messages,
         )
 
+        print(f"\nModel response {response}")
         print(f"  stop_reason: {response.stop_reason}")
 
         if response.stop_reason == "end_turn":

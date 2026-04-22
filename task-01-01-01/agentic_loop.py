@@ -1,6 +1,9 @@
 import os
 import json
 import anthropic
+from dotenv import load_dotenv
+
+load_dotenv()
 
 client = anthropic.Anthropic()
 
@@ -48,7 +51,7 @@ def run_agentic_loop(user_message: str):
 
     while True:
         response = client.messages.create(
-            model=os.getenv("MODEL_ID", "claude-sonnet-4-20250514"),
+            model=os.getenv("MODEL_ID", "claude-sonnet-4-6"),
             max_tokens=1024,
             tools=tools,
             messages=messages,

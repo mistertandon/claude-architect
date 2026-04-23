@@ -16,6 +16,9 @@ import os
 import json
 import anthropic
 from tools import TOOLS, execute_tool
+from dotenv import load_dotenv
+
+load_dotenv()
 
 client = anthropic.Anthropic()
 
@@ -37,12 +40,13 @@ def run_iteration_cap(user_message: str):
     # stop_reason is checked inside but the cap dominates termination.
     for iteration in range(1, MAX_ITERATIONS + 1):
         response = client.messages.create(
-            model=os.getenv("MODEL_ID", "claude-sonnet-4-20250514"),
+            model=os.getenv("MODEL_ID", "claude-sonnet-4-6"),
             max_tokens=1024,
             tools=TOOLS,
             messages=messages,
         )
 
+        print(f"\nModel response {response}")
         print(f"  [Iteration {iteration}/{MAX_ITERATIONS} | stop_reason: {response.stop_reason}]")
 
         if response.stop_reason == "end_turn":

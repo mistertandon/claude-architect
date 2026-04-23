@@ -16,6 +16,9 @@ import os
 import json
 import anthropic
 from tools import TOOLS, execute_tool
+from dotenv import load_dotenv
+
+load_dotenv()
 
 client = anthropic.Anthropic()
 
@@ -37,12 +40,13 @@ def run_text_presence(user_message: str):
     while True:
         iteration += 1
         response = client.messages.create(
-            model=os.getenv("MODEL_ID", "claude-sonnet-4-20250514"),
+            model=os.getenv("MODEL_ID", "claude-sonnet-4-6"),
             max_tokens=1024,
             tools=TOOLS,
             messages=messages,
         )
 
+        print(f"\nModel response {response}")
         print(f"  [Iteration {iteration} | stop_reason: {response.stop_reason}]")
 
         # Log what content types are present — this is what makes the bug visible.

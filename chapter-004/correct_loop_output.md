@@ -3,12 +3,13 @@
 ############################################################
 
 ============================================================
-CORRECT: stop_reason-based loop
+### CORRECT: stop_reason-based loop
 ============================================================
-User: Check my balance on ACC-001, show recent transactions, then transfer $100 to ACC-002.
+
+#### User: Check my balance on ACC-001, show recent transactions, then transfer $100 to ACC-002.
 
 
-Model response 
+__Model response__
 ```
 Message(
     id="msg_011m3RJeGfULdnYQdAGcs1vv",
@@ -130,17 +131,64 @@ Everything went smoothly! Let me know if there's anything else you need. 😊
 ############################################################
 
 ============================================================
-CORRECT: stop_reason-based loop
+### CORRECT: stop_reason-based loop
 ============================================================
 User: What's the balance on ACC-003?
 
 
-Model response Message(id='msg_016xKjRWYQ9Zxnk62Yy9r1Ed', container=None, content=[TextBlock(citations=None, text="I'll check the balance for account ACC-003 right away!", type='text'), ToolUseBlock(id='toolu_018EyN3ag3T4dNY8WVwp7nEX', caller=DirectCaller(type='direct'), input={'account_id': 'ACC-003'}, name='get_account_balance', type='tool_use')], model='claude-sonnet-4-6', role='assistant', stop_details=None, stop_reason='tool_use', stop_sequence=None, type='message', usage=Usage(cache_creation=CacheCreation(ephemeral_1h_input_tokens=0, ephemeral_5m_input_tokens=0), cache_creation_input_tokens=0, cache_read_input_tokens=0, inference_geo='global', input_tokens=778, output_tokens=74, server_tool_use=None, service_tier='standard'))
-  [Iteration 1 | stop_reason: tool_use]
-  Tool: get_account_balance({"account_id": "ACC-003"})
-  Result: {"account_id": "ACC-003", "balance": 12400.0}
+Model response
 
-Model response Message(id='msg_012TPhzZLCsGJCo51iX25ANv', container=None, content=[TextBlock(citations=None, text="The current balance for account **ACC-003** is **$12,400.00**. Is there anything else you'd like to know?", type='text')], model='claude-sonnet-4-6', role='assistant', stop_details=None, stop_reason='end_turn', stop_sequence=None, type='message', usage=Usage(cache_creation=CacheCreation(ephemeral_1h_input_tokens=0, ephemeral_5m_input_tokens=0), cache_creation_input_tokens=0, cache_read_input_tokens=0, inference_geo='global', input_tokens=882, output_tokens=33, server_tool_use=None, service_tier='standard'))
+```
+Message(
+    id="msg_016xKjRWYQ9Zxnk62Yy9r1Ed",
+    content=[
+        TextBlock(
+            citations=None,
+            text="I'll check the balance for account ACC-003 right away!",
+            type="text"
+        ),
+
+        ToolUseBlock(
+            id="toolu_018EyN3ag3T4dNY8WVwp7nEX",
+            caller=DirectCaller(
+                type="direct"
+            ),
+            input={
+                "account_id": "ACC-003"
+            },
+            name="get_account_balance",
+            type="tool_use"
+        ),
+    ],
+    ...
+)
+```
+
+[Iteration 1 | stop_reason: tool_use]
+Tool: get_account_balance({"account_id": "ACC-003"})
+Result: {"account_id": "ACC-003", "balance": 12400.0}
+
+Model response
+
+```
+Message(
+    id="msg_012TPhzZLCsGJCo51iX25ANv",
+    container=None,
+    content=[
+        TextBlock(
+            citations=None,
+            text=(
+                "The current balance for account **ACC-003** "
+                "is **$12,400.00**. "
+                "Is there anything else you'd like to know?"
+            ),
+            type="text"
+        )
+    ],
+    ...
+)
+```
+
   [Iteration 2 | stop_reason: end_turn]
 
 Assistant: The current balance for account **ACC-003** is **$12,400.00**. Is there anything else you'd like to know?

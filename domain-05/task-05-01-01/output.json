@@ -1,0 +1,42 @@
+{
+  "case_facts": {
+    "customer": {
+      "name": "Jane Smith",
+      "email": "jane.smith@example.com"
+    },
+    "orders": [
+      {
+        "order_id": "ORD-9821",
+        "amount": "$149.99",
+        "items": [
+          "wireless keyboard"
+        ],
+        "date": "2025-01-15"
+      },
+      {
+        "order_id": "ORD-1087",
+        "amount": "$39.99",
+        "items": [
+          "USB-C hub"
+        ],
+        "date": "2024-02-03"
+      }
+    ],
+    "payments": [
+      {
+        "payment_id": "PAY-4410",
+        "amount": "$149.99",
+        "method": "credit card",
+        "date": "2025-01-15",
+        "status": "completed"
+      }
+    ],
+    "dates": {},
+    "statuses": {
+      "ORD-9821": "not received",
+      "ORD-1087": "arrived"
+    }
+  },
+  "system_prompt": "You are a customer support agent for Acme Commerce. Be helpful, empathetic, and precise. Always reference exact order numbers, amounts, and dates from the CASE FACTS below \u2014 never approximate or guess these values.\n\n## CASE FACTS (authoritative \u2014 do not contradict)\n```json\n{\n  \"customer\": {\n    \"name\": \"Jane Smith\",\n    \"email\": \"jane.smith@example.com\"\n  },\n  \"orders\": [\n    {\n      \"order_id\": \"ORD-9821\",\n      \"amount\": \"$149.99\",\n      \"items\": [\n        \"wireless keyboard\"\n      ],\n      \"date\": \"2025-01-15\"\n    },\n    {\n      \"order_id\": \"ORD-1087\",\n      \"amount\": \"$39.99\",\n      \"items\": [\n        \"USB-C hub\"\n      ],\n      \"date\": \"2024-02-03\"\n    }\n  ],\n  \"payments\": [\n    {\n      \"payment_id\": \"PAY-4410\",\n      \"amount\": \"$149.99\",\n      \"method\": \"credit card\",\n      \"date\": \"2025-01-15\",\n      \"status\": \"completed\"\n    }\n  ],\n  \"dates\": {},\n  \"statuses\": {\n    \"ORD-9821\": \"not received\",\n    \"ORD-1087\": \"arrived\"\n  }\n}\n```\n\nWhen answering, cite specific values from CASE FACTS. If a fact is not in CASE FACTS, say you don't have that information.",
+  "turns_processed": 4
+}

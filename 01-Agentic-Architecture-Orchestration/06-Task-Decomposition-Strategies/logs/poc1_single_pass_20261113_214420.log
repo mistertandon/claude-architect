@@ -1,0 +1,112 @@
+21:44:20  MODEL INPUT   prompt       Review all 3 files of this codebase in one pass. Return one review per file, in the order given, then every cross-file issue: data flow between modules, inconsistent API usage, and patterns used differently across files. Name every file each cross-file issue involves.
+
+=== checkout.ts (31 lines) ===
+   1 | // checkout.ts - the checkout flow of the Fernway Outfitters order service
+   2 | 
+   3 | import { reserveStock } from "./inventory";
+   4 | import { LineItem, PriceEntry, orderTotal } from "./pricing";
+   5 | 
+   6 | export interface Order {
+   7 |   id: string;
+   8 |   status: string;
+   9 |   items: LineItem[];
+  10 | }
+  11 | 
+  12 | /** Reserves every line, then charges the order. Throws when an item is out of stock. */
+  13 | export function checkout(order: Order, prices: PriceEntry[]): string {
+  14 |   for (const item of order.items) {
+  15 |     try {
+  16 |       reserveStock(item.sku, item.quantity);
+  17 |     } catch (err) {
+  18 |       throw new Error(`Out of stock: ${item.sku}`);
+  19 |     }
+  20 |   }
+  21 |   const amountDollars = orderTotal(order.items, prices);
+  22 |   return `Charged $${amountDollars.toFixed(2)} for order ${order.id}`;
+  23 | }
+  24 | 
+  25 | /** Returns the receipt heading for an order. */
+  26 | export function receiptHeading(order: Order): string {
+  27 |   if (order.status = "paid") {
+  28 |     return `Receipt for order ${order.id}`;
+  29 |   }
+  30 |   return `Awaiting payment for order ${order.id}`;
+  31 | }
+
+=== inventory.ts (26 lines) ===
+   1 | // inventory.ts - stock levels for the Fernway Outfitters order service
+   2 | 
+   3 | const stock = new Map<string, number>();
+   4 | 
+   5 | /** Reserves stock for one order line. Returns false when stock is short; never throws. */
+   6 | export function reserveStock(sku: string, quantity: number): boolean {
+   7 |   const available = stock.get(sku) ?? 0;
+   8 |   if (available < quantity) return false;
+   9 |   stock.set(sku, available - quantity);
+  10 |   return true;
+  11 | }
+  12 | 
+  13 | /** True when the restocking fee for a shipment equals the amount on the supplier invoice. */
+  14 | export function feeMatchesInvoice(units: number, unitFee: number, invoiced: number): boolean {
+  15 |   return units * unitFee === invoiced;
+  16 | }
+  17 | 
+  18 | /** Returns the display name of each backordered row. */
+  19 | export function backorderedNames(rows: { id: string }[], lookup: { id: string; name: string }[]): string[] {
+  20 |   const names: string[] = [];
+  21 |   rows.forEach((row) => {
+  22 |     const match = lookup.find((entry) => entry.id === row.id);
+  23 |     if (match) names.push(match.name);
+  24 |   });
+  25 |   return names;
+  26 | }
+
+=== pricing.ts (40 lines) ===
+   1 | // pricing.ts - order totals and bulk discounts for the Fernway Outfitters order service
+   2 | 
+   3 | export interface LineItem {
+   4 |   sku: string;
+   5 |   quantity: number;
+   6 | }
+   7 | 
+   8 | export interface PriceEntry {
+   9 |   sku: string;
+  10 |   unitPriceCents: number;
+  11 | }
+  12 | 
+  13 | /** Returns the order total in integer cents. */
+  14 | export function orderTotal(items: LineItem[], prices: PriceEntry[]): number {
+  15 |   const unitPriceCents = new Map(prices.map((entry) => [entry.sku, entry.unitPriceCents]));
+  16 |   let totalCents = 0;
+  17 |   for (const item of items) {
+  18 |     totalCents += (unitPriceCents.get(item.sku) ?? 0) * item.quantity;
+  19 |   }
+  20 |   return totalCents;
+  21 | }
+  22 | 
+  23 | /** Returns the discount percent of the highest tier the quantity reaches (5% per tier). */
+  24 | export function bulkDiscountPercent(quantity: number, tiers: number[]): number {
+  25 |   let percent = 0;
+  26 |   for (let i = 0; i <= tiers.length; i++) {
+  27 |     if (quantity >= tiers[i]) percent = (i + 1) * 5;
+  28 |   }
+  29 |   return percent;
+  30 | }
+  31 | 
+  32 | /** Returns the display name of each priced row. */
+  33 | export function pricedNames(rows: { id: string }[], lookup: { id: string; name: string }[]): string[] {
+  34 |   const names: string[] = [];
+  35 |   rows.forEach((row) => {
+  36 |     const match = lookup.find((entry) => entry.id === row.id);
+  37 |     if (match) names.push(match.name);
+  38 |   });
+  39 |   return names;
+  40 | }
+21:44:33  MODEL OUTPUT  structured   {'files': [{'file': 'checkout.ts', 'bug_count': 3, 'issues': [{'line': 16, 'severity': 'critical', 'description': 'reserveStock returns false and never throws, so the try/catch never fires and out-of-stock items are silently accepted and charged.'}, {'line': 21, 'severity': 'critical', 'description': 'orderTotal returns integer cents but the value is named amountDollars and formatted with toFixed(2) as dollars, overcharging/misreporting by 100x.'}, {'line': 27, 'severity': 'major', 'description': 'Assignment `=` instead of comparison `===` in the condition: it overwrites order.status with "paid" and always takes the paid branch.'}], 'exports': ['interface Order { id: string; status: string; items: LineItem[] }', 'checkout(order: Order, prices: PriceEntry[]): string - returns receipt string; intended to throw Error on out-of-stock (in practice never throws from reserve); amount formatting wrongly treats cents as dollars', 'receiptHeading(order: Order): string - returns heading; mutates order.status'], 'uses': ['inventory.reserveStock(item.sku, item.quantity) - assumes it throws on shortage, but it returns boolean false', 'pricing.orderTotal(order.items, prices) - assumes dollars, actually returns integer cents', 'pricing.LineItem, pricing.PriceEntry types']}, {'file': 'inventory.ts', 'bug_count': 3, 'issues': [{'line': 3, 'severity': 'major', 'description': 'The stock map is never populated and no function adds stock, so every reservation fails (available is always 0).'}, {'line': 15, 'severity': 'major', 'description': 'Exact === comparison of units * unitFee against invoiced uses floating-point money values, which can fail on rounding (e.g. 0.1*3); compare in integer cents or with a tolerance.'}, {'line': 19, 'severity': 'minor', 'description': 'backorderedNames does an O(n*m) linear find per row; build a Map for lookup. It is also duplicated verbatim as pricedNames in pricing.ts.'}], 'exports': ['reserveStock(sku: string, quantity: number): boolean - true if reserved, false if short; never throws; no validation of negative/NaN quantity', 'feeMatchesInvoice(units: number, unitFee: number, invoiced: number): boolean - exact float equality, units unspecified', 'backorderedNames(rows: {id}[], lookup: {id,name}[]): string[]'], 'uses': []}, {'file': 'pricing.ts', 'bug_count': 3, 'issues': [{'line': 26, 'severity': 'major', 'description': 'Loop bound i <= tiers.length reads tiers[tiers.length] (undefined); quantity >= undefined is false so it is harmless now but is an off-by-one that should be i < tiers.length.'}, {'line': 27, 'severity': 'major', 'description': 'Assumes tiers are sorted ascending; with unsorted tiers a later lower tier overrides a higher one, giving the wrong discount.'}, {'line': 18, 'severity': 'major', 'description': 'Missing SKU price silently defaults to 0, so unknown items are charged nothing instead of raising an error.'}, {'line': 33, 'severity': 'minor', 'description': 'pricedNames is O(n*m) with linear find per row and duplicates backorderedNames from inventory.ts.'}], 'exports': ['interface LineItem { sku: string; quantity: number }', 'interface PriceEntry { sku: string; unitPriceCents: number }', 'orderTotal(items: LineItem[], prices: PriceEntry[]): number - integer cents; unknown SKUs count as 0', 'bulkDiscountPercent(quantity: number, tiers: number[]): number - percent 0..; 5% per tier', 'pricedNames(rows, lookup): string[]'], 'uses': []}], 'cross_file_issues': [{'files': ['checkout.ts', 'inventory.ts'], 'kind': 'api_consistency', 'description': 'checkout wraps reserveStock in try/catch expecting a throw on shortage, but reserveStock returns false and never throws, so out-of-stock is never detected; the boolean result is ignored. Also, reserves made for earlier lines are not rolled back on later failure.'}, {'files': ['checkout.ts', 'pricing.ts'], 'kind': 'data_flow', 'description': 'orderTotal returns integer cents, but checkout treats it as dollars (amountDollars, toFixed(2)), producing a 100x wrong charge message.'}, {'files': ['inventory.ts', 'pricing.ts'], 'kind': 'pattern_consistency', 'description': 'backorderedNames and pricedNames are duplicated lookup-by-id implementations with the same O(n*m) find; should be shared and use a Map.'}, {'files': ['checkout.ts', 'inventory.ts', 'pricing.ts'], 'kind': 'pattern_consistency', 'description': "Inconsistent error handling and money units: inventory signals failure via boolean, checkout expects exceptions, pricing silently defaults missing data to 0, and inventory's feeMatchesInvoice uses float units while pricing uses integer cents."}]}  (id=toolu_01K5gjmQCTS36z6d7P6TScLm)
+21:44:33  MODEL INPUT   tool_result  Structured output provided successfully  (tool_use_id=toolu_01K5gjmQCTS36z6d7P6TScLm, is_error=None)
+21:44:33  MODEL OUTPUT  stop_reason  tool_use  (loop result: success)
+21:44:34  #1 checkout.ts: 3 issue(s), planted bug flagged: True
+21:44:34  #2 inventory.ts: 3 issue(s), planted bug flagged: True
+21:44:34  #3 pricing.ts: 4 issue(s), planted bug flagged: True
+21:44:34  forEach + nested find, identical in both files: {'pricing.ts': False, 'inventory.ts': False} -> consistent
+21:44:34  Cross-file issues found: ['cents vs dollars', 'false vs throw'] (2 of 2)

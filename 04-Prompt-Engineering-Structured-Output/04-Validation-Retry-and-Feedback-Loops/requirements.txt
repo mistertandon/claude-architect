@@ -1,0 +1,2 @@
+claude-agent-sdk>=0.2.174,<0.3  # the Claude Agent SDK; it bundles the Claude Code binary it drives
+python-dotenv>=1.0.0            # loads the settings from .env

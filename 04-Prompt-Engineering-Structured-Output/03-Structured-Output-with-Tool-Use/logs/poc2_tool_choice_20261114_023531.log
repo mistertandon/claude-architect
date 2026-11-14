@@ -1,0 +1,132 @@
+02:35:31  MODEL INPUT   prompt       New document in the accounts inbox:
+
+RIDGEWAY SHELVING CO.
+Invoice RS-20417
+Date: 2026-09-14
+Bill to: Fernway Outfitters
+4 x steel warehouse shelving unit @ $460.00 = $1,840.00
+Sales tax (8%): $147.20
+Total due: $1,987.20  (tool_choice={'type': 'auto'})
+02:35:40  MODEL OUTPUT  tool_use     extract_metadata {'document_type': 'invoice', 'sender': 'Ridgeway Shelving Co.'}  (id=toolu_01V2GxsUDbK2jzoyA5MxsnYo)
+02:35:40  MODEL OUTPUT  stop_reason  tool_use  (Messages API)
+02:35:40  auto   D1: extract_metadata, first block thinking, schema problems none
+02:35:40  MODEL INPUT   prompt       New document in the accounts inbox:
+
+Marta's Taxi Service
+Monthly statement for the Fernway Outfitters sales team
+14 rides between your Bend store and the airport
+Fares: $351.36
+GST: $35.14
+Please pay: $386.50
+Thank you!  (tool_choice={'type': 'auto'})
+02:35:44  MODEL OUTPUT  tool_use     extract_metadata {'document_type': 'invoice', 'document_type_detail': 'Monthly statement requesting payment for 14 taxi rides', 'sender': "Marta's Taxi Service"}  (id=toolu_01SAPJvdR9tnxd198Z1MBM4d)
+02:35:44  MODEL OUTPUT  stop_reason  tool_use  (Messages API)
+02:35:44  auto   D4: extract_metadata, first block thinking, schema problems none
+02:35:44  MODEL INPUT   prompt       New document in the accounts inbox:
+
+TRAILSIDE CAFE
+2026-10-12 08:41
+2 x flat white $4.50
+1 x breakfast burrito $9.75
+Total $18.75
+Paid: Visa ****4417  (tool_choice={'type': 'auto'})
+02:35:46  MODEL OUTPUT  tool_use     extract_metadata {'document_type': 'receipt', 'sender': 'TRAILSIDE CAFE'}  (id=toolu_01LSaAqBcF7GcvCW29XTjvgu)
+02:35:46  MODEL OUTPUT  stop_reason  tool_use  (Messages API)
+02:35:46  auto   R1: extract_metadata, first block thinking, schema problems none
+02:35:46  MODEL INPUT   prompt       New document in the accounts inbox:
+
+Kestrel Supply newsletter: our autumn catalogue is out! New insulated jackets, and 20% off tents until 31 October. Visit kestrelsupply.example to browse.  (tool_choice={'type': 'auto'})
+02:35:48  MODEL OUTPUT  tool_use     extract_metadata {'document_type': 'other', 'document_type_detail': 'Marketing newsletter (autumn catalogue announcement with promotional offer). No payment requested.', 'sender': 'Kestrel Supply'}  (id=toolu_01UtrYbnYm9xCBBC9RVaiiKs)
+02:35:48  MODEL OUTPUT  stop_reason  tool_use  (Messages API)
+02:35:48  auto   N1: extract_metadata, first block thinking, schema problems none
+02:35:48  auto   4/4 called a tool ['D1->extract_metadata', 'D4->extract_metadata', 'R1->extract_metadata', 'N1->extract_metadata']; text only: none; schema problems: 0
+02:35:48  MODEL INPUT   prompt       New document in the accounts inbox:
+
+RIDGEWAY SHELVING CO.
+Invoice RS-20417
+Date: 2026-09-14
+Bill to: Fernway Outfitters
+4 x steel warehouse shelving unit @ $460.00 = $1,840.00
+Sales tax (8%): $147.20
+Total due: $1,987.20  (tool_choice={'type': 'any'})
+02:35:56  MODEL OUTPUT  tool_use     extract_metadata {'document_type': 'invoice', 'sender': 'RIDGEWAY SHELVING CO.'}  (id=toolu_01L1ApmJ4sVbd2s2ktBPRkcS)
+02:35:56  MODEL OUTPUT  tool_use     extract_invoice {'vendor_name': 'RIDGEWAY SHELVING CO.', 'total_amount': 1987.2, 'category': 'equipment', 'invoice_date': '2026-09-14', 'tax_amount': 147.2}  (id=toolu_01MPWpTZq45csGPR75FbtiWX)
+02:35:56  MODEL OUTPUT  stop_reason  tool_use  (Messages API)
+02:35:56  any    D1: extract_metadata, first block tool_use, schema problems none
+02:35:56  MODEL INPUT   prompt       New document in the accounts inbox:
+
+Marta's Taxi Service
+Monthly statement for the Fernway Outfitters sales team
+14 rides between your Bend store and the airport
+Fares: $351.36
+GST: $35.14
+Please pay: $386.50
+Thank you!  (tool_choice={'type': 'any'})
+02:35:59  MODEL OUTPUT  tool_use     extract_metadata {'document_type': 'invoice', 'document_type_detail': 'Monthly statement requesting payment for 14 taxi rides between Bend store and airport', 'sender': "Marta's Taxi Service"}  (id=toolu_01L9VvpyLgjxiU6U1EbzWiBx)
+02:35:59  MODEL OUTPUT  tool_use     extract_invoice {'vendor_name': "Marta's Taxi Service", 'total_amount': 386.5, 'category': 'travel', 'tax_amount': 35.14}  (id=toolu_01G4cRvh8dGe2vJKj3tcVMao)
+02:35:59  MODEL OUTPUT  stop_reason  tool_use  (Messages API)
+02:35:59  any    D4: extract_metadata, first block tool_use, schema problems none
+02:35:59  MODEL INPUT   prompt       New document in the accounts inbox:
+
+TRAILSIDE CAFE
+2026-10-12 08:41
+2 x flat white $4.50
+1 x breakfast burrito $9.75
+Total $18.75
+Paid: Visa ****4417  (tool_choice={'type': 'any'})
+02:36:01  MODEL OUTPUT  tool_use     extract_metadata {'document_type': 'receipt', 'document_type_detail': 'Point-of-sale receipt from Trailside Cafe, already paid by Visa ****4417', 'sender': 'TRAILSIDE CAFE'}  (id=toolu_01SM4PSnhPvjqoXBzTK5tmto)
+02:36:01  MODEL OUTPUT  tool_use     extract_receipt {'merchant': 'TRAILSIDE CAFE', 'total_amount': 18.75, 'payment_method': 'card', 'purchase_date': '2026-10-12'}  (id=toolu_016ojo87eVsTXzve5sZUoJEQ)
+02:36:01  MODEL OUTPUT  stop_reason  tool_use  (Messages API)
+02:36:01  any    R1: extract_metadata, first block tool_use, schema problems none
+02:36:01  MODEL INPUT   prompt       New document in the accounts inbox:
+
+Kestrel Supply newsletter: our autumn catalogue is out! New insulated jackets, and 20% off tents until 31 October. Visit kestrelsupply.example to browse.  (tool_choice={'type': 'any'})
+02:36:03  MODEL OUTPUT  tool_use     extract_metadata {'document_type': 'other', 'document_type_detail': 'Marketing newsletter from Kestrel Supply promoting an autumn catalogue and a 20% tent discount until 31 October. No payment request.', 'sender': 'Kestrel Supply'}  (id=toolu_01J3HNSTub9XgvbKfq2Kbbna)
+02:36:03  MODEL OUTPUT  stop_reason  tool_use  (Messages API)
+02:36:03  any    N1: extract_metadata, first block tool_use, schema problems none
+02:36:03  any    4/4 called a tool ['D1->extract_metadata', 'D4->extract_metadata', 'R1->extract_metadata', 'N1->extract_metadata']; text only: none; schema problems: 0
+02:36:03  MODEL INPUT   prompt       New document in the accounts inbox:
+
+RIDGEWAY SHELVING CO.
+Invoice RS-20417
+Date: 2026-09-14
+Bill to: Fernway Outfitters
+4 x steel warehouse shelving unit @ $460.00 = $1,840.00
+Sales tax (8%): $147.20
+Total due: $1,987.20  (tool_choice={'type': 'tool', 'name': 'extract_metadata'})
+02:36:04  MODEL OUTPUT  tool_use     extract_metadata {'document_type': 'invoice', 'sender': 'RIDGEWAY SHELVING CO.'}  (id=toolu_01NVGLrtckmYgNgLEiVkPpsu)
+02:36:04  MODEL OUTPUT  tool_use     extract_invoice {'vendor_name': 'RIDGEWAY SHELVING CO.', 'total_amount': 1987.2, 'category': 'equipment', 'invoice_date': '2026-09-14', 'tax_amount': 147.2}  (id=toolu_01GfVLECHBQHZBrhqAa1M15a)
+02:36:04  MODEL OUTPUT  stop_reason  tool_use  (Messages API)
+02:36:04  forced D1: extract_metadata, first block tool_use, schema problems none
+02:36:04  MODEL INPUT   prompt       New document in the accounts inbox:
+
+Marta's Taxi Service
+Monthly statement for the Fernway Outfitters sales team
+14 rides between your Bend store and the airport
+Fares: $351.36
+GST: $35.14
+Please pay: $386.50
+Thank you!  (tool_choice={'type': 'tool', 'name': 'extract_metadata'})
+02:36:06  MODEL OUTPUT  tool_use     extract_metadata {'document_type': 'invoice', 'document_type_detail': 'Monthly statement requesting payment for 14 taxi rides between Bend store and airport', 'sender': "Marta's Taxi Service"}  (id=toolu_01BUBQdXCccfCbVvshKNZ4tR)
+02:36:06  MODEL OUTPUT  tool_use     extract_invoice {'vendor_name': "Marta's Taxi Service", 'total_amount': 386.5, 'category': 'travel', 'tax_amount': 35.14}  (id=toolu_011UiAHrPKtftjSFitwkeV9R)
+02:36:06  MODEL OUTPUT  stop_reason  tool_use  (Messages API)
+02:36:06  forced D4: extract_metadata, first block tool_use, schema problems none
+02:36:06  MODEL INPUT   prompt       New document in the accounts inbox:
+
+TRAILSIDE CAFE
+2026-10-12 08:41
+2 x flat white $4.50
+1 x breakfast burrito $9.75
+Total $18.75
+Paid: Visa ****4417  (tool_choice={'type': 'tool', 'name': 'extract_metadata'})
+02:36:08  MODEL OUTPUT  tool_use     extract_metadata {'document_type': 'receipt', 'document_type_detail': 'Point-of-sale receipt from Trailside Cafe, already paid by Visa ****4417', 'sender': 'TRAILSIDE CAFE'}  (id=toolu_01XFcYMgY3RjXtMQAw2u3NP5)
+02:36:08  MODEL OUTPUT  tool_use     extract_receipt {'merchant': 'TRAILSIDE CAFE', 'total_amount': 18.75, 'payment_method': 'card', 'purchase_date': '2026-10-12'}  (id=toolu_0161HVhqYLuUMjcjfEA3RtEt)
+02:36:08  MODEL OUTPUT  stop_reason  tool_use  (Messages API)
+02:36:08  forced R1: extract_metadata, first block tool_use, schema problems none
+02:36:08  MODEL INPUT   prompt       New document in the accounts inbox:
+
+Kestrel Supply newsletter: our autumn catalogue is out! New insulated jackets, and 20% off tents until 31 October. Visit kestrelsupply.example to browse.  (tool_choice={'type': 'tool', 'name': 'extract_metadata'})
+02:36:10  MODEL OUTPUT  tool_use     extract_metadata {'document_type': 'other', 'document_type_detail': 'Marketing newsletter from Kestrel Supply promoting an autumn catalogue and a tent discount; no payment requested.', 'sender': 'Kestrel Supply'}  (id=toolu_01XDNWve1JedBEJWrvAvRoYK)
+02:36:10  MODEL OUTPUT  stop_reason  tool_use  (Messages API)
+02:36:10  forced N1: extract_metadata, first block tool_use, schema problems none
+02:36:10  forced 4/4 called a tool ['D1->extract_metadata', 'D4->extract_metadata', 'R1->extract_metadata', 'N1->extract_metadata']; text only: none; schema problems: 0

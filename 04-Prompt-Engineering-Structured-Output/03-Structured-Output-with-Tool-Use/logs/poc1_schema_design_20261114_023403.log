@@ -1,0 +1,156 @@
+02:34:03  MODEL INPUT   prompt       Extract this invoice.
+
+<document>
+RIDGEWAY SHELVING CO.
+Invoice RS-20417
+Date: 2026-09-14
+Bill to: Fernway Outfitters
+4 x steel warehouse shelving unit @ $460.00 = $1,840.00
+Sales tax (8%): $147.20
+Total due: $1,987.20
+</document>
+02:34:07  MODEL OUTPUT  structured   {'vendor_name': 'Ridgeway Shelving Co.', 'total_amount': 1987.2, 'category': 'equipment', 'invoice_number': 'RS-20417', 'invoice_date': '2026-09-14', 'tax_amount': 147.2}  (id=toolu_018d3sKGV6DmF8Vxct7EXkVR)
+02:34:07  MODEL INPUT   tool_result  Structured output provided successfully  (tool_use_id=toolu_018d3sKGV6DmF8Vxct7EXkVR, is_error=None)
+02:34:07  MODEL OUTPUT  stop_reason  tool_use  (loop result: success)
+02:34:08  naive    D1: vendor_name=correct total_amount=correct category=correct invoice_number=correct invoice_date=correct tax_amount=correct
+02:34:08  MODEL INPUT   prompt       Extract this invoice.
+
+<document>
+CLOUDNEST SOFTWARE
+Invoice CN-88213
+Issued 2026-10-01
+Inventory sync subscription, October 2026: $450.00
+Tax: $36.00
+Amount due: $486.00
+</document>
+02:34:11  MODEL OUTPUT  structured   {'vendor_name': 'CloudNest Software', 'total_amount': 486, 'category': 'software', 'invoice_number': 'CN-88213', 'invoice_date': '2026-10-01', 'tax_amount': 36}  (id=toolu_01QGBzeVcUGjDUxnF2wPtKfC)
+02:34:11  MODEL INPUT   tool_result  Structured output provided successfully  (tool_use_id=toolu_01QGBzeVcUGjDUxnF2wPtKfC, is_error=None)
+02:34:11  MODEL OUTPUT  stop_reason  tool_use  (loop result: success)
+02:34:13  naive    D2: vendor_name=correct total_amount=correct category=correct invoice_number=correct invoice_date=correct tax_amount=correct
+02:34:13  MODEL INPUT   prompt       Extract this invoice.
+
+<document>
+HOLLIS PEST CONTROL
+Invoice HPC-5521
+2026-09-30
+Quarterly warehouse pest treatment: $280.00
+Tax: $22.40
+Total: $302.40
+</document>
+02:34:17  MODEL OUTPUT  thinking     The category list offers equipment, software, office_supplies, and travel, and none of them fits a pest control service. I have to pick one anyway, so office_supplies looks like the least bad fallback. I'll note that mismatch in my reply and then make the tool call.
+
+
+02:34:17  MODEL OUTPUT  structured   {'vendor_name': 'Hollis Pest Control', 'total_amount': 302.4, 'category': 'office_supplies', 'invoice_number': 'HPC-5521', 'invoice_date': '2026-09-30', 'tax_amount': 22.4}  (id=toolu_01HEwfnciTYhMtsTJ7i8cyGL)
+02:34:17  MODEL INPUT   tool_result  Structured output provided successfully  (tool_use_id=toolu_01HEwfnciTYhMtsTJ7i8cyGL, is_error=None)
+02:34:17  MODEL OUTPUT  stop_reason  tool_use  (loop result: success)
+02:34:19  naive    D3: vendor_name=correct total_amount=correct category=wrong('office_supplies') invoice_number=correct invoice_date=correct tax_amount=correct
+02:34:19  MODEL INPUT   prompt       Extract this invoice.
+
+<document>
+Marta's Taxi Service
+Monthly statement for the Fernway Outfitters sales team
+14 rides between your Bend store and the airport
+Fares: $351.36
+GST: $35.14
+Please pay: $386.50
+Thank you!
+</document>
+02:34:22  MODEL OUTPUT  thinking     I'm noticing the document doesn't have an invoice number or date, so I'll leave those as empty strings rather than null, since the required fields have to be strings.
+
+
+02:34:22  MODEL OUTPUT  structured   {'vendor_name': "Marta's Taxi Service", 'total_amount': 386.5, 'category': 'travel', 'invoice_number': '', 'invoice_date': '', 'tax_amount': 35.14}  (id=toolu_01PazHTJegHwctFBTBTNkeTx)
+02:34:22  MODEL INPUT   tool_result  Structured output provided successfully  (tool_use_id=toolu_01PazHTJegHwctFBTBTNkeTx, is_error=None)
+02:34:22  MODEL OUTPUT  stop_reason  tool_use  (loop result: success)
+02:34:23  naive    D4: vendor_name=correct total_amount=correct category=correct invoice_number=invented('') invoice_date=invented('') tax_amount=correct
+02:34:23  MODEL INPUT   prompt       Extract this invoice.
+
+<document>
+KESTREL RIDGE HOLDINGS
+Date: 2026-10-05
+For: as agreed
+Amount due: $2,400.00
+Payment within 30 days.
+</document>
+02:34:32  MODEL OUTPUT  thinking     I'm checking the document for the invoice number, tax amount, and category, and none of them are actually stated. I'm leaning toward leaving the invoice number empty and not inventing a tax figure, but the category field has to hold one of the listed values, so I'm weighing which option fits best.
+
+I'm going with 0 for the tax and flagging that it wasn't stated in the document. The category has to be one of the listed values, so I'll pick the closest fit and note that it's a guess.
+
+
+02:34:32  MODEL OUTPUT  structured   {'vendor_name': 'Kestrel Ridge Holdings', 'total_amount': 2400, 'category': 'equipment', 'invoice_number': '', 'invoice_date': '2026-10-05', 'tax_amount': 0}  (id=toolu_01XHn2q4LvoEN4EudKQ4KCM2)
+02:34:32  MODEL INPUT   tool_result  Structured output provided successfully  (tool_use_id=toolu_01XHn2q4LvoEN4EudKQ4KCM2, is_error=None)
+02:34:32  MODEL OUTPUT  stop_reason  tool_use  (loop result: success)
+02:34:33  naive    D5: vendor_name=correct total_amount=correct category=wrong('equipment') invoice_number=invented('') invoice_date=correct tax_amount=invented(0)
+02:34:33  naive    totals: 4 of 4 absent fields invented, 2 of 5 categories wrong
+02:34:33  MODEL INPUT   prompt       Extract this invoice.
+
+<document>
+RIDGEWAY SHELVING CO.
+Invoice RS-20417
+Date: 2026-09-14
+Bill to: Fernway Outfitters
+4 x steel warehouse shelving unit @ $460.00 = $1,840.00
+Sales tax (8%): $147.20
+Total due: $1,987.20
+</document>
+02:34:37  MODEL OUTPUT  structured   {'vendor_name': 'RIDGEWAY SHELVING CO.', 'total_amount': 1987.2, 'category': 'equipment', 'invoice_number': 'RS-20417', 'invoice_date': '2026-09-14', 'tax_amount': 147.2, 'category_detail': None}  (id=toolu_01BYq2JqjYLLxSLgp4mCne3S)
+02:34:37  MODEL INPUT   tool_result  Structured output provided successfully  (tool_use_id=toolu_01BYq2JqjYLLxSLgp4mCne3S, is_error=None)
+02:34:37  MODEL OUTPUT  stop_reason  tool_use  (loop result: success)
+02:34:38  nullable D1: vendor_name=correct total_amount=correct category=correct invoice_number=correct invoice_date=correct tax_amount=correct category_detail=correct
+02:34:38  MODEL INPUT   prompt       Extract this invoice.
+
+<document>
+CLOUDNEST SOFTWARE
+Invoice CN-88213
+Issued 2026-10-01
+Inventory sync subscription, October 2026: $450.00
+Tax: $36.00
+Amount due: $486.00
+</document>
+02:34:41  MODEL OUTPUT  structured   {'vendor_name': 'CLOUDNEST SOFTWARE', 'total_amount': 486, 'category': 'software', 'invoice_date': '2026-10-01', 'invoice_number': 'CN-88213', 'tax_amount': 36, 'category_detail': None}  (id=toolu_01W6jjFZbP8zDj9pskncHfiN)
+02:34:41  MODEL INPUT   tool_result  Structured output provided successfully  (tool_use_id=toolu_01W6jjFZbP8zDj9pskncHfiN, is_error=None)
+02:34:41  MODEL OUTPUT  stop_reason  tool_use  (loop result: success)
+02:34:43  nullable D2: vendor_name=correct total_amount=correct category=correct invoice_number=correct invoice_date=correct tax_amount=correct category_detail=correct
+02:34:43  MODEL INPUT   prompt       Extract this invoice.
+
+<document>
+HOLLIS PEST CONTROL
+Invoice HPC-5521
+2026-09-30
+Quarterly warehouse pest treatment: $280.00
+Tax: $22.40
+Total: $302.40
+</document>
+02:34:46  MODEL OUTPUT  structured   {'vendor_name': 'HOLLIS PEST CONTROL', 'total_amount': 302.4, 'category': 'other', 'category_detail': 'Quarterly warehouse pest control treatment (service)', 'invoice_date': '2026-09-30', 'invoice_number': 'HPC-5521', 'tax_amount': 22.4}  (id=toolu_01QReLAnYkR3KK9cJpdoCjsD)
+02:34:46  MODEL INPUT   tool_result  Structured output provided successfully  (tool_use_id=toolu_01QReLAnYkR3KK9cJpdoCjsD, is_error=None)
+02:34:46  MODEL OUTPUT  stop_reason  tool_use  (loop result: success)
+02:34:47  nullable D3: vendor_name=correct total_amount=correct category=correct invoice_number=correct invoice_date=correct tax_amount=correct category_detail=correct
+02:34:47  MODEL INPUT   prompt       Extract this invoice.
+
+<document>
+Marta's Taxi Service
+Monthly statement for the Fernway Outfitters sales team
+14 rides between your Bend store and the airport
+Fares: $351.36
+GST: $35.14
+Please pay: $386.50
+Thank you!
+</document>
+02:34:50  MODEL OUTPUT  structured   {'vendor_name': "Marta's Taxi Service", 'total_amount': 386.5, 'tax_amount': 35.14, 'category': 'travel', 'invoice_date': None, 'invoice_number': None, 'category_detail': None}  (id=toolu_016GBue6iKMd2eZdiX75PoTV)
+02:34:50  MODEL INPUT   tool_result  Structured output provided successfully  (tool_use_id=toolu_016GBue6iKMd2eZdiX75PoTV, is_error=None)
+02:34:50  MODEL OUTPUT  stop_reason  tool_use  (loop result: success)
+02:34:51  nullable D4: vendor_name=correct total_amount=correct category=correct invoice_number=null invoice_date=null tax_amount=correct category_detail=correct
+02:34:51  MODEL INPUT   prompt       Extract this invoice.
+
+<document>
+KESTREL RIDGE HOLDINGS
+Date: 2026-10-05
+For: as agreed
+Amount due: $2,400.00
+Payment within 30 days.
+</document>
+02:34:54  MODEL OUTPUT  structured   {'vendor_name': 'KESTREL RIDGE HOLDINGS', 'total_amount': 2400, 'category': 'unclear', 'invoice_date': '2026-10-05', 'invoice_number': None, 'tax_amount': None, 'category_detail': None}  (id=toolu_01WrEYLZjcVKCYCo7gVqjvUo)
+02:34:55  MODEL INPUT   tool_result  Structured output provided successfully  (tool_use_id=toolu_01WrEYLZjcVKCYCo7gVqjvUo, is_error=None)
+02:34:55  MODEL OUTPUT  stop_reason  tool_use  (loop result: success)
+02:34:56  nullable D5: vendor_name=correct total_amount=correct category=correct invoice_number=null invoice_date=correct tax_amount=null category_detail=correct
+02:34:56  nullable totals: 0 of 4 absent fields invented, 0 of 5 categories wrong
+02:34:56  Same documents, prompt, model and options: only the schema changed

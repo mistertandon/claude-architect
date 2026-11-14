@@ -1,0 +1,336 @@
+02:28:42  MODEL INPUT   system       You extract invoice data for the accounts-payable team of Fernway Outfitters, an outdoor-gear store. Fill every field from the document: vendor_name is the company that issued the invoice, as written; invoice_date is the date the invoice was issued and due_date the date payment is due, both as YYYY-MM-DD; total_amount is the total amount due, as a number without a currency symbol; line_items has one entry per billed product or service, with its description, quantity and unit_price as numbers. Use only information in the document.
+02:28:42  MODEL INPUT   prompt       Extract the invoice below.
+
+<document>
+RIDGEWAY SHELVING CO.: INVOICE
+Invoice date: 2026-09-14 | Due date: 2026-10-14 | Bill to: Fernway Outfitters
+| Item                        | Qty | Unit price | Amount   |
+| Steel shelving unit, 5-tier | 4   | 310.00     | 1,240.00 |
+| Corner bracket kit          | 4   | 22.50      | 90.00    |
+| Total due                   |     |            | 1,330.00 |
+</document>
+02:28:45  MODEL OUTPUT  structured   {'vendor_name': 'RIDGEWAY SHELVING CO.', 'invoice_date': '2026-09-14', 'due_date': '2026-10-14', 'total_amount': 1330, 'line_items': [{'description': 'Steel shelving unit, 5-tier', 'quantity': 4, 'unit_price': 310}, {'description': 'Corner bracket kit', 'quantity': 4, 'unit_price': 22.5}]}  (id=toolu_01RTU5MuncrS18fiXytHJRye)
+02:28:45  MODEL INPUT   tool_result  Structured output provided successfully  (tool_use_id=toolu_01RTU5MuncrS18fiXytHJRye, is_error=None)
+02:28:45  MODEL OUTPUT  stop_reason  tool_use  (loop result: success)
+02:28:47  base     T1 (table): vendor_name=correct invoice_date=correct due_date=correct total_amount=correct line_items=correct
+02:28:47  MODEL INPUT   prompt       Extract the invoice below.
+
+<document>
+CLOUDNEST SOFTWARE: INVOICE
+Date: 2026-10-01 | Payment due: 2026-10-31 | Customer: Fernway Outfitters
+| Item                             | Qty | Unit price | Amount |
+| Inventory sync licence (monthly) | 3   | 120.00     | 360.00 |
+| Priority support add-on          | 1   | 85.00      | 85.00  |
+| Total due                        |     |            | 455.00 |
+</document>
+02:28:51  MODEL OUTPUT  structured   {'vendor_name': 'CLOUDNEST SOFTWARE', 'invoice_date': '2026-10-01', 'due_date': '2026-10-31', 'total_amount': 455, 'line_items': [{'description': 'Inventory sync licence (monthly)', 'quantity': 3, 'unit_price': 120}, {'description': 'Priority support add-on', 'quantity': 1, 'unit_price': 85}]}  (id=toolu_01NGbDdSBnbXaWZd3FogHj1W)
+02:28:51  MODEL INPUT   tool_result  Structured output provided successfully  (tool_use_id=toolu_01NGbDdSBnbXaWZd3FogHj1W, is_error=None)
+02:28:51  MODEL OUTPUT  stop_reason  tool_use  (loop result: success)
+02:28:52  base     T2 (table): vendor_name=correct invoice_date=correct due_date=correct total_amount=correct line_items=correct
+02:28:52  MODEL INPUT   prompt       Extract the invoice below.
+
+<document>
+Summit Tentworks
+
+Dear Fernway team,
+
+this letter is our invoice, dated the third of September 2026. We delivered six Alpine two-person tents at one hundred eighty-nine dollars each, together with twelve packs of aluminium stakes at $7.50 a pack. As agreed, the replacement poles we sent last month remain free of charge. The total for this delivery is one thousand two hundred twenty-four dollars, payable within thirty days of the invoice date.
+
+Kind regards,
+Marta Ruiz
+</document>
+02:28:56  MODEL OUTPUT  thinking     I'm checking the arithmetic: 6 times 189 is 1134, 12 times 7.5 is 90, and the total comes to 1224, which matches. The due date works out to 2026-10-03, 30 days after 2026-09-03. I'm deciding whether the free poles belong in the list; since only billed products get an entry, I'll leave them out.
+
+
+02:28:56  MODEL OUTPUT  structured   {'vendor_name': 'Summit Tentworks', 'invoice_date': '2026-09-03', 'due_date': '2026-10-03', 'total_amount': 1224, 'line_items': [{'description': 'Alpine two-person tent', 'quantity': 6, 'unit_price': 189}, {'description': 'Pack of aluminium stakes', 'quantity': 12, 'unit_price': 7.5}]}  (id=toolu_01AhN7My8gbr27YjV2Yy4D4P)
+02:28:56  MODEL INPUT   tool_result  Structured output provided successfully  (tool_use_id=toolu_01AhN7My8gbr27YjV2Yy4D4P, is_error=None)
+02:28:56  MODEL OUTPUT  stop_reason  tool_use  (loop result: success)
+02:28:57  base     N1 (narrative): vendor_name=correct invoice_date=correct due_date=correct total_amount=correct line_items=correct
+02:28:57  MODEL INPUT   prompt       Extract the invoice below.
+
+<document>
+Okafor Sign Works, note dated 18 September 2026
+
+Hi Fernway, a quick note to bill you for the trail-signage job at your Bend store: our crew installed fourteen trail signs at $45 each and used two bags of mounting hardware at twenty-two dollars a bag. That makes $674 in total.
+
+Thanks,
+Dev Okafor
+</document>
+02:29:02  MODEL OUTPUT  thinking     I've checked the arithmetic and the total is 674. The document doesn't give a due date, and since it's a required field I shouldn't make one up, so I'll leave it as an empty string and tell the user.
+
+
+02:29:02  MODEL OUTPUT  structured   {'vendor_name': 'Okafor Sign Works', 'invoice_date': '2026-09-18', 'due_date': '', 'total_amount': 674, 'line_items': [{'description': 'Trail sign installation', 'quantity': 14, 'unit_price': 45}, {'description': 'Mounting hardware bag', 'quantity': 2, 'unit_price': 22}]}  (id=toolu_01GBxLpLFMGSvBRiYL84J2Aj)
+02:29:02  MODEL INPUT   tool_result  Structured output provided successfully  (tool_use_id=toolu_01GBxLpLFMGSvBRiYL84J2Aj, is_error=None)
+02:29:02  MODEL OUTPUT  stop_reason  tool_use  (loop result: success)
+02:29:03  base     N2 (narrative): vendor_name=correct invoice_date=correct due_date=probe:'' total_amount=correct line_items=correct
+02:29:03  MODEL INPUT   prompt       Extract the invoice below.
+
+<document>
+HOLLIS PEST CONTROL: Invoice HPC-5521
+Issued: 30/09/2026 (dates on this invoice are DD/MM/YYYY)
+| Service                       | Qty | Rate   | Amount |
+| Quarterly warehouse treatment | 1   | 260.00 | 260.00 |
+Notes: we also replaced 3 bait stations at $14.00 each; they are added to this invoice.
+Terms: payment due 15 days after the issue date.
+Total due: $302.00
+</document>
+02:29:06  MODEL OUTPUT  text         Issue date 30/09/2026 → 2026-09-30. Due 15 days later → 2026-10-15. Total 260 + 42 = 302.
+02:29:07  MODEL OUTPUT  structured   {'vendor_name': 'HOLLIS PEST CONTROL', 'invoice_date': '2026-09-30', 'due_date': '2026-10-15', 'total_amount': 302, 'line_items': [{'description': 'Quarterly warehouse treatment', 'quantity': 1, 'unit_price': 260}, {'description': 'Replacement bait stations', 'quantity': 3, 'unit_price': 14}]}  (id=toolu_01MSRMXG57yKni56V4sQTt5y)
+02:29:07  MODEL INPUT   tool_result  Structured output provided successfully  (tool_use_id=toolu_01MSRMXG57yKni56V4sQTt5y, is_error=None)
+02:29:07  MODEL OUTPUT  stop_reason  tool_use  (loop result: success)
+02:29:08  base     M1 (mixed): vendor_name=correct invoice_date=correct due_date=correct total_amount=correct line_items=correct
+02:29:08  MODEL INPUT   system       You extract invoice data for the accounts-payable team of Fernway Outfitters, an outdoor-gear store. Fill every field from the document: vendor_name is the company that issued the invoice, as written; invoice_date is the date the invoice was issued and due_date the date payment is due, both as YYYY-MM-DD; total_amount is the total amount due, as a number without a currency symbol; line_items has one entry per billed product or service, with its description, quantity and unit_price as numbers. Use only information in the document.
+
+Worked examples:
+<example>
+<document>
+BRIGHTLINE PACKAGING: INVOICE
+Invoice date: 2026-08-02 | Due date: 2026-09-01
+| Item                  | Qty | Unit price | Amount |
+| Shipping boxes, large | 200 | 1.15       | 230.00 |
+| Packing tape, 6-pack  | 10  | 8.40       | 84.00  |
+| Total due             |     |            | 314.00 |
+</document>
+<extraction>{"vendor_name": "Brightline Packaging", "invoice_date": "2026-08-02", "due_date": "2026-09-01", "total_amount": 314.0, "line_items": [{"description": "Shipping boxes, large", "quantity": 200, "unit_price": 1.15}, {"description": "Packing tape, 6-pack", "quantity": 10, "unit_price": 8.4}]}</extraction>
+</example>
+<example>
+<document>
+Juniper Lantern Co.
+
+Hello Fernway, please treat this letter as our invoice, dated the fifth of August 2026. We shipped eight brass camp lanterns at twenty-five dollars each and four replacement glass globes at $6.50 apiece. The carry bags we included are complimentary. The amount due is two hundred twenty-six dollars, payable within fourteen days of the invoice date.
+</document>
+<extraction>{"vendor_name": "Juniper Lantern Co.", "invoice_date": "2026-08-05", "due_date": "2026-08-19", "total_amount": 226.0, "line_items": [{"description": "Brass camp lantern", "quantity": 8, "unit_price": 25.0}, {"description": "Replacement glass globe", "quantity": 4, "unit_price": 6.5}]}</extraction>
+</example>
+<example>
+<document>
+CASCADE FILTERS LTD: Invoice CF-3307
+Issued: 12/08/2026 (dates on this invoice are DD/MM/YYYY)
+| Product                | Qty | Rate  | Amount |
+| Water filter cartridge | 20  | 18.00 | 360.00 |
+Notes: we also sent 5 spare O-ring kits at $3.00 each, added to this invoice.
+Terms: payment due 21 days after the issue date.
+Total due: $375.00
+</document>
+<extraction>{"vendor_name": "Cascade Filters Ltd", "invoice_date": "2026-08-12", "due_date": "2026-09-02", "total_amount": 375.0, "line_items": [{"description": "Water filter cartridge", "quantity": 20, "unit_price": 18.0}, {"description": "Spare O-ring kit", "quantity": 5, "unit_price": 3.0}]}</extraction>
+</example>
+02:29:08  MODEL INPUT   prompt       Extract the invoice below.
+
+<document>
+RIDGEWAY SHELVING CO.: INVOICE
+Invoice date: 2026-09-14 | Due date: 2026-10-14 | Bill to: Fernway Outfitters
+| Item                        | Qty | Unit price | Amount   |
+| Steel shelving unit, 5-tier | 4   | 310.00     | 1,240.00 |
+| Corner bracket kit          | 4   | 22.50      | 90.00    |
+| Total due                   |     |            | 1,330.00 |
+</document>
+02:29:15  MODEL OUTPUT  structured   {'vendor_name': 'Ridgeway Shelving Co.', 'invoice_date': '2026-09-14', 'due_date': '2026-10-14', 'total_amount': 1330, 'line_items': [{'description': 'Steel shelving unit, 5-tier', 'quantity': 4, 'unit_price': 310}, {'description': 'Corner bracket kit', 'quantity': 4, 'unit_price': 22.5}]}  (id=toolu_01FqWkwyqDSgiDxsUuLQjDFj)
+02:29:15  MODEL INPUT   tool_result  Structured output provided successfully  (tool_use_id=toolu_01FqWkwyqDSgiDxsUuLQjDFj, is_error=None)
+02:29:15  MODEL OUTPUT  stop_reason  tool_use  (loop result: success)
+02:29:16  pairs    T1 (table): vendor_name=correct invoice_date=correct due_date=correct total_amount=correct line_items=correct
+02:29:16  MODEL INPUT   prompt       Extract the invoice below.
+
+<document>
+CLOUDNEST SOFTWARE: INVOICE
+Date: 2026-10-01 | Payment due: 2026-10-31 | Customer: Fernway Outfitters
+| Item                             | Qty | Unit price | Amount |
+| Inventory sync licence (monthly) | 3   | 120.00     | 360.00 |
+| Priority support add-on          | 1   | 85.00      | 85.00  |
+| Total due                        |     |            | 455.00 |
+</document>
+02:29:20  MODEL OUTPUT  structured   {'vendor_name': 'CloudNest Software', 'invoice_date': '2026-10-01', 'due_date': '2026-10-31', 'total_amount': 455, 'line_items': [{'description': 'Inventory sync licence (monthly)', 'quantity': 3, 'unit_price': 120}, {'description': 'Priority support add-on', 'quantity': 1, 'unit_price': 85}]}  (id=toolu_01G7pq7ySjSH6wsXx6JCD2f7)
+02:29:20  MODEL INPUT   tool_result  Structured output provided successfully  (tool_use_id=toolu_01G7pq7ySjSH6wsXx6JCD2f7, is_error=None)
+02:29:20  MODEL OUTPUT  stop_reason  tool_use  (loop result: success)
+02:29:21  pairs    T2 (table): vendor_name=correct invoice_date=correct due_date=correct total_amount=correct line_items=correct
+02:29:21  MODEL INPUT   prompt       Extract the invoice below.
+
+<document>
+Summit Tentworks
+
+Dear Fernway team,
+
+this letter is our invoice, dated the third of September 2026. We delivered six Alpine two-person tents at one hundred eighty-nine dollars each, together with twelve packs of aluminium stakes at $7.50 a pack. As agreed, the replacement poles we sent last month remain free of charge. The total for this delivery is one thousand two hundred twenty-four dollars, payable within thirty days of the invoice date.
+
+Kind regards,
+Marta Ruiz
+</document>
+02:29:25  MODEL OUTPUT  thinking     I'm checking the arithmetic: 6 times 189 is 1134, 12 times 7.5 is 90, and the total comes to 1224, which matches. I also note the due date is 2026-10-03.
+
+
+02:29:25  MODEL OUTPUT  structured   {'vendor_name': 'Summit Tentworks', 'invoice_date': '2026-09-03', 'due_date': '2026-10-03', 'total_amount': 1224, 'line_items': [{'description': 'Alpine two-person tent', 'quantity': 6, 'unit_price': 189}, {'description': 'Pack of aluminium stakes', 'quantity': 12, 'unit_price': 7.5}]}  (id=toolu_01X4eq54UhVdjH4NvDL2Aozi)
+02:29:25  MODEL INPUT   tool_result  Structured output provided successfully  (tool_use_id=toolu_01X4eq54UhVdjH4NvDL2Aozi, is_error=None)
+02:29:25  MODEL OUTPUT  stop_reason  tool_use  (loop result: success)
+02:29:27  pairs    N1 (narrative): vendor_name=correct invoice_date=correct due_date=correct total_amount=correct line_items=correct
+02:29:27  MODEL INPUT   prompt       Extract the invoice below.
+
+<document>
+Okafor Sign Works, note dated 18 September 2026
+
+Hi Fernway, a quick note to bill you for the trail-signage job at your Bend store: our crew installed fourteen trail signs at $45 each and used two bags of mounting hardware at twenty-two dollars a bag. That makes $674 in total.
+
+Thanks,
+Dev Okafor
+</document>
+02:29:31  MODEL OUTPUT  thinking     I've checked the arithmetic and it comes out to 674, which matches. The document doesn't give a due date, and the field is required, but I can't make one up, so I'll leave it as an empty string.
+
+
+02:29:31  MODEL OUTPUT  structured   {'vendor_name': 'Okafor Sign Works', 'invoice_date': '2026-09-18', 'due_date': '', 'total_amount': 674, 'line_items': [{'description': 'Trail sign installation', 'quantity': 14, 'unit_price': 45}, {'description': 'Bag of mounting hardware', 'quantity': 2, 'unit_price': 22}]}  (id=toolu_01XUFGiVG9pQyJhksRk4BEi9)
+02:29:31  MODEL INPUT   tool_result  Structured output provided successfully  (tool_use_id=toolu_01XUFGiVG9pQyJhksRk4BEi9, is_error=None)
+02:29:31  MODEL OUTPUT  stop_reason  tool_use  (loop result: success)
+02:29:32  pairs    N2 (narrative): vendor_name=correct invoice_date=correct due_date=probe:'' total_amount=correct line_items=correct
+02:29:32  MODEL INPUT   prompt       Extract the invoice below.
+
+<document>
+HOLLIS PEST CONTROL: Invoice HPC-5521
+Issued: 30/09/2026 (dates on this invoice are DD/MM/YYYY)
+| Service                       | Qty | Rate   | Amount |
+| Quarterly warehouse treatment | 1   | 260.00 | 260.00 |
+Notes: we also replaced 3 bait stations at $14.00 each; they are added to this invoice.
+Terms: payment due 15 days after the issue date.
+Total due: $302.00
+</document>
+02:29:37  MODEL OUTPUT  thinking     I'm checking the dates: an issue date of 2026-09-30 plus 15 days lands on 2026-10-15. The total of 302 also checks out, since 260 plus 42 equals 302.
+
+
+02:29:38  MODEL OUTPUT  structured   {'vendor_name': 'Hollis Pest Control', 'invoice_date': '2026-09-30', 'due_date': '2026-10-15', 'total_amount': 302, 'line_items': [{'description': 'Quarterly warehouse treatment', 'quantity': 1, 'unit_price': 260}, {'description': 'Bait station replacement', 'quantity': 3, 'unit_price': 14}]}  (id=toolu_01ReD2imjpicHNtqcKHZD33R)
+02:29:38  MODEL INPUT   tool_result  Structured output provided successfully  (tool_use_id=toolu_01ReD2imjpicHNtqcKHZD33R, is_error=None)
+02:29:38  MODEL OUTPUT  stop_reason  tool_use  (loop result: success)
+02:29:39  pairs    M1 (mixed): vendor_name=correct invoice_date=correct due_date=correct total_amount=correct line_items=correct
+02:29:39  MODEL INPUT   system       You extract invoice data for the accounts-payable team of Fernway Outfitters, an outdoor-gear store. Fill every field from the document: vendor_name is the company that issued the invoice, as written; invoice_date is the date the invoice was issued and due_date the date payment is due, both as YYYY-MM-DD; total_amount is the total amount due, as a number without a currency symbol; line_items has one entry per billed product or service, with its description, quantity and unit_price as numbers. Use only information in the document.
+
+Worked examples:
+<example>
+<document>
+BRIGHTLINE PACKAGING: INVOICE
+Invoice date: 2026-08-02 | Due date: 2026-09-01
+| Item                  | Qty | Unit price | Amount |
+| Shipping boxes, large | 200 | 1.15       | 230.00 |
+| Packing tape, 6-pack  | 10  | 8.40       | 84.00  |
+| Total due             |     |            | 314.00 |
+</document>
+<reasoning>Each product row is a line item with its Qty and Unit price. The Total due row is the invoice total, not a line item. Both dates are already YYYY-MM-DD.</reasoning>
+<extraction>{"vendor_name": "Brightline Packaging", "invoice_date": "2026-08-02", "due_date": "2026-09-01", "total_amount": 314.0, "line_items": [{"description": "Shipping boxes, large", "quantity": 200, "unit_price": 1.15}, {"description": "Packing tape, 6-pack", "quantity": 10, "unit_price": 8.4}]}</extraction>
+</example>
+<example>
+<document>
+Juniper Lantern Co.
+
+Hello Fernway, please treat this letter as our invoice, dated the fifth of August 2026. We shipped eight brass camp lanterns at twenty-five dollars each and four replacement glass globes at $6.50 apiece. The carry bags we included are complimentary. The amount due is two hundred twenty-six dollars, payable within fourteen days of the invoice date.
+</document>
+<reasoning>This is a letter, so the facts are in sentences. "Dated the fifth of August 2026" is the invoice date, 2026-08-05. Numbers written as words become digits: eight lanterns at 25.00, four globes at 6.50. The carry bags are complimentary, so nothing is billed and they are not a line item. "Payable within fourteen days of the invoice date" gives the due date: 2026-08-05 plus 14 days is 2026-08-19. The total, 226.00, matches 8 x 25.00 + 4 x 6.50.</reasoning>
+<extraction>{"vendor_name": "Juniper Lantern Co.", "invoice_date": "2026-08-05", "due_date": "2026-08-19", "total_amount": 226.0, "line_items": [{"description": "Brass camp lantern", "quantity": 8, "unit_price": 25.0}, {"description": "Replacement glass globe", "quantity": 4, "unit_price": 6.5}]}</extraction>
+</example>
+<example>
+<document>
+CASCADE FILTERS LTD: Invoice CF-3307
+Issued: 12/08/2026 (dates on this invoice are DD/MM/YYYY)
+| Product                | Qty | Rate  | Amount |
+| Water filter cartridge | 20  | 18.00 | 360.00 |
+Notes: we also sent 5 spare O-ring kits at $3.00 each, added to this invoice.
+Terms: payment due 21 days after the issue date.
+Total due: $375.00
+</document>
+<reasoning>The header says the dates are DD/MM/YYYY, so 12/08/2026 is 12 August 2026: 2026-08-12. The table has one product, and the note adds a second billed item, 5 O-ring kits at 3.00. The terms give the due date: 2026-08-12 plus 21 days is 2026-09-02. The total, 375.00, matches 360.00 + 15.00.</reasoning>
+<extraction>{"vendor_name": "Cascade Filters Ltd", "invoice_date": "2026-08-12", "due_date": "2026-09-02", "total_amount": 375.0, "line_items": [{"description": "Water filter cartridge", "quantity": 20, "unit_price": 18.0}, {"description": "Spare O-ring kit", "quantity": 5, "unit_price": 3.0}]}</extraction>
+</example>
+02:29:39  MODEL INPUT   prompt       Extract the invoice below.
+
+<document>
+RIDGEWAY SHELVING CO.: INVOICE
+Invoice date: 2026-09-14 | Due date: 2026-10-14 | Bill to: Fernway Outfitters
+| Item                        | Qty | Unit price | Amount   |
+| Steel shelving unit, 5-tier | 4   | 310.00     | 1,240.00 |
+| Corner bracket kit          | 4   | 22.50      | 90.00    |
+| Total due                   |     |            | 1,330.00 |
+</document>
+02:29:43  MODEL OUTPUT  structured   {'vendor_name': 'Ridgeway Shelving Co.', 'invoice_date': '2026-09-14', 'due_date': '2026-10-14', 'total_amount': 1330, 'line_items': [{'description': 'Steel shelving unit, 5-tier', 'quantity': 4, 'unit_price': 310}, {'description': 'Corner bracket kit', 'quantity': 4, 'unit_price': 22.5}]}  (id=toolu_01F5FeyLy1o4U9PZQ1sRwyyR)
+02:29:43  MODEL INPUT   tool_result  Structured output provided successfully  (tool_use_id=toolu_01F5FeyLy1o4U9PZQ1sRwyyR, is_error=None)
+02:29:43  MODEL OUTPUT  stop_reason  tool_use  (loop result: success)
+02:29:45  few-shot T1 (table): vendor_name=correct invoice_date=correct due_date=correct total_amount=correct line_items=correct
+02:29:45  MODEL INPUT   prompt       Extract the invoice below.
+
+<document>
+CLOUDNEST SOFTWARE: INVOICE
+Date: 2026-10-01 | Payment due: 2026-10-31 | Customer: Fernway Outfitters
+| Item                             | Qty | Unit price | Amount |
+| Inventory sync licence (monthly) | 3   | 120.00     | 360.00 |
+| Priority support add-on          | 1   | 85.00      | 85.00  |
+| Total due                        |     |            | 455.00 |
+</document>
+02:29:52  MODEL OUTPUT  structured   {'vendor_name': 'CloudNest Software', 'invoice_date': '2026-10-01', 'due_date': '2026-10-31', 'total_amount': 455, 'line_items': [{'description': 'Inventory sync licence (monthly)', 'quantity': 3, 'unit_price': 120}, {'description': 'Priority support add-on', 'quantity': 1, 'unit_price': 85}]}  (id=toolu_01A5CXBzxi95dogEBpeZcCfV)
+02:29:52  MODEL INPUT   tool_result  Structured output provided successfully  (tool_use_id=toolu_01A5CXBzxi95dogEBpeZcCfV, is_error=None)
+02:29:52  MODEL OUTPUT  stop_reason  tool_use  (loop result: success)
+02:29:53  few-shot T2 (table): vendor_name=correct invoice_date=correct due_date=correct total_amount=correct line_items=correct
+02:29:53  MODEL INPUT   prompt       Extract the invoice below.
+
+<document>
+Summit Tentworks
+
+Dear Fernway team,
+
+this letter is our invoice, dated the third of September 2026. We delivered six Alpine two-person tents at one hundred eighty-nine dollars each, together with twelve packs of aluminium stakes at $7.50 a pack. As agreed, the replacement poles we sent last month remain free of charge. The total for this delivery is one thousand two hundred twenty-four dollars, payable within thirty days of the invoice date.
+
+Kind regards,
+Marta Ruiz
+</document>
+02:29:57  MODEL OUTPUT  thinking     I'm checking the arithmetic: 6 × 189 gives 1134, and 12 × 7.5 gives 90, so the total of 1224 holds up. Next I'm working out the due date, which is 30 days after September 3, landing on October 3.
+
+
+02:29:57  MODEL OUTPUT  structured   {'vendor_name': 'Summit Tentworks', 'invoice_date': '2026-09-03', 'due_date': '2026-10-03', 'total_amount': 1224, 'line_items': [{'description': 'Alpine two-person tent', 'quantity': 6, 'unit_price': 189}, {'description': 'Pack of aluminium stakes', 'quantity': 12, 'unit_price': 7.5}]}  (id=toolu_013KdMQxJrLVUH5TyoqPLFNd)
+02:29:57  MODEL INPUT   tool_result  Structured output provided successfully  (tool_use_id=toolu_013KdMQxJrLVUH5TyoqPLFNd, is_error=None)
+02:29:57  MODEL OUTPUT  stop_reason  tool_use  (loop result: success)
+02:29:58  few-shot N1 (narrative): vendor_name=correct invoice_date=correct due_date=correct total_amount=correct line_items=correct
+02:29:58  MODEL INPUT   prompt       Extract the invoice below.
+
+<document>
+Okafor Sign Works, note dated 18 September 2026
+
+Hi Fernway, a quick note to bill you for the trail-signage job at your Bend store: our crew installed fourteen trail signs at $45 each and used two bags of mounting hardware at twenty-two dollars a bag. That makes $674 in total.
+
+Thanks,
+Dev Okafor
+</document>
+02:30:02  MODEL OUTPUT  thinking     I've checked the arithmetic and it holds at 674. The document doesn't state a due date, and the schema requires a string, but I'd rather not invent one, so I'm leaving that field as an empty string.
+
+
+02:30:02  MODEL OUTPUT  structured   {'vendor_name': 'Okafor Sign Works', 'invoice_date': '2026-09-18', 'due_date': '', 'total_amount': 674, 'line_items': [{'description': 'Trail sign installation', 'quantity': 14, 'unit_price': 45}, {'description': 'Bag of mounting hardware', 'quantity': 2, 'unit_price': 22}]}  (id=toolu_012C6mm9tgcCJ8fpmJR6wTkd)
+02:30:02  MODEL INPUT   tool_result  Structured output provided successfully  (tool_use_id=toolu_012C6mm9tgcCJ8fpmJR6wTkd, is_error=None)
+02:30:02  MODEL OUTPUT  stop_reason  tool_use  (loop result: success)
+02:30:04  few-shot N2 (narrative): vendor_name=correct invoice_date=correct due_date=probe:'' total_amount=correct line_items=correct
+02:30:04  MODEL INPUT   prompt       Extract the invoice below.
+
+<document>
+HOLLIS PEST CONTROL: Invoice HPC-5521
+Issued: 30/09/2026 (dates on this invoice are DD/MM/YYYY)
+| Service                       | Qty | Rate   | Amount |
+| Quarterly warehouse treatment | 1   | 260.00 | 260.00 |
+Notes: we also replaced 3 bait stations at $14.00 each; they are added to this invoice.
+Terms: payment due 15 days after the issue date.
+Total due: $302.00
+</document>
+02:30:07  MODEL OUTPUT  thinking     I'm adding 15 days to 30 September 2026, which lands on 15 October 2026, and summing 260 and 42 to get 302.
+
+
+02:30:08  MODEL OUTPUT  structured   {'vendor_name': 'Hollis Pest Control', 'invoice_date': '2026-09-30', 'due_date': '2026-10-15', 'total_amount': 302, 'line_items': [{'description': 'Quarterly warehouse treatment', 'quantity': 1, 'unit_price': 260}, {'description': 'Bait station replacement', 'quantity': 3, 'unit_price': 14}]}  (id=toolu_01YW9ijgy5gUzgZG7HqCuBVX)
+02:30:08  MODEL INPUT   tool_result  Structured output provided successfully  (tool_use_id=toolu_01YW9ijgy5gUzgZG7HqCuBVX, is_error=None)
+02:30:08  MODEL OUTPUT  stop_reason  tool_use  (loop result: success)
+02:30:09  few-shot M1 (mixed): vendor_name=correct invoice_date=correct due_date=correct total_amount=correct line_items=correct
+02:30:09  failure table vendor_name  table 0/2, narrative 0/2, mixed 0/1
+02:30:09  failure table invoice_date table 0/2, narrative 0/2, mixed 0/1
+02:30:09  failure table due_date     table 0/2, narrative 0/1, mixed 0/1
+02:30:09  failure table total_amount table 0/2, narrative 0/2, mixed 0/1
+02:30:09  failure table line_items   table 0/2, narrative 0/2, mixed 0/1
+02:30:09  diagnosis: no base failures
+02:30:09  base     empty 0/24  ISO dates 9/9  accuracy 24/24  changed between runs: n/a (1 run)
+02:30:09  base     by structure: table 10/10, narrative 9/9, mixed 5/5
+02:30:09  pairs    empty 0/24  ISO dates 9/9  accuracy 24/24  changed between runs: n/a (1 run)
+02:30:09  pairs    by structure: table 10/10, narrative 9/9, mixed 5/5
+02:30:09  few-shot empty 0/24  ISO dates 9/9  accuracy 24/24  changed between runs: n/a (1 run)
+02:30:09  few-shot by structure: table 10/10, narrative 9/9, mixed 5/5
+02:30:09  Same instructions in every arm: only the examples changed
+02:30:09  reasoning vs pairs on patterns no example shows (N1 line items, N2, T2 total): pairs 1/1 + 4/4 + 1/1, few-shot 1/1 + 4/4 + 1/1
+02:30:09  matrix narrative extraction  base 9/9  few-shot 9/9  fixed by examples: already fine  -> few-shot examples
+02:30:09  matrix mixed formats         base 5/5  few-shot 5/5  fixed by examples: already fine  -> few-shot examples
+02:30:09  matrix format consistency    base 9/9  few-shot 9/9  fixed by examples: already fine  -> few-shot examples
+02:30:09  matrix missing data (N2 due) base probe:''  few-shot probe:''  fixed by examples: no  -> nullable schema fields (topic 03)
+02:30:09  matrix sum discrepancy (T2)  base items 445.00 vs total 455  few-shot items 445.00 vs total 455  fixed by examples: no  -> validation and retry loop (topic 04)
+02:30:09  matrix malformed JSON        base 0  few-shot 0 calls without structured output  -> tool use / output_format (topic 03)

@@ -1,14 +1,14 @@
 ---
 name: poc-to-article
 description: Write a developer-friendly article (<script>-article.md, next to the script) that explains one POC script for the Claude Certified Architect – Foundations exam — its end-to-end execution flow, the significance of every code snippet and agentic AI concept, a turn-by-turn trace built from a REAL run log of the logging version, an exam lens (objectives from the curriculum raw file, raw Messages API equivalent, scenario questions with answers, cheat sheet) — then presents it verbatim as a styled HTML Artifact from the skill's article-template.html. Requires BOTH the POC path and its log file(s); refuses to run without either. Use when the user runs /poc-to-article <POC .py file or folder> <log file(s)> or asks to explain a POC as an article.
-argument-hint: <POC script or folder> <log file(s)> (both required), e.g. raw-poc/01-Agentic-Architecture-Orchestration/01-Agentic-Loops/poc2_agent_loop.py 01-Agentic-Architecture-Orchestration/01-Agentic-Loops/logs/poc2_agent_loop_20261026_191138.log
+argument-hint: <POC script or folder> <log file(s)> (both required), e.g. 01-Agentic-Architecture-Orchestration/01-Agentic-Loops/poc2_agent_loop.py 01-Agentic-Architecture-Orchestration/01-Agentic-Loops/logs/poc2_agent_loop_20261026_191138.log
 ---
 
 # poc-to-article
 
 Explain the POC at `$ARGUMENTS` as a Claude architect expert writing for developers: what runs, in what order, why each snippet exists, which agentic concept it shows, what a real run printed, and how the exam tests it.
 
-**Reference result:** `raw-poc/01-Agentic-Architecture-Orchestration/01-Agentic-Loops/poc2_agent_loop-article.md` (written 2026-10-28). Read it first and match its structure, depth and tone.
+**Reference result (format only):** `01-Agentic-Architecture-Orchestration/02-Multi-Agent-Orchestration/poc1_hub_and_spoke-article.md` (written 2026-11-14). Read only this `.md` and match its structure, depth and tone. It is a layout example, not a code source: never read or quote the code next to it.
 
 Project root: `/mnt/CC0E50740E505992/claude-cert/ccar-f`.
 
@@ -16,6 +16,7 @@ Project root: `/mnt/CC0E50740E505992/claude-cert/ccar-f`.
 
 - **Both arguments are mandatory: the POC path AND the log file(s).** If either is missing, do NOT run: read nothing, write nothing, and reply only with the usage line `/poc-to-article <POC script or folder> <log file(s)>` and what is missing. Never search for a log yourself and never fall back to an "expected" trace.
 - `$ARGUMENTS` = first token: one `.py` script, or a POC folder. A folder → one article per entry-point script (`poc*.py` with `if __name__ == "__main__"`); list them and the article names before writing.
+- **The POC path the user passes is the only code source and the highest priority.** Read, explain and quote code only from that script/folder and the local modules it imports from the same folder. Never look up, compare with or copy from another copy of the POC elsewhere in the project — in particular nothing under `raw-poc/` (unless the user's own path is there). This overrides any earlier article, memory note or habit that says snippets come from `raw-poc/`.
 - Remaining tokens = the **log file(s)** for the real run. Paths are relative to the project root or absolute. Match each log to its script by the `<script stem>_` filename prefix. For a folder, every entry-point script needs a log: list script → log pairs and stop if any script has none. A path or log that doesn't exist, or a log whose prefix matches no script → stop and say which.
 - Output: `<script stem>-article.md` in the **same folder** as the script (e.g. `poc2_agent_loop.py` → `poc2_agent_loop-article.md`). If it exists, say so and ask before overwriting.
 - Also publish the article as a styled HTML Artifact (section 5).
@@ -23,12 +24,14 @@ Project root: `/mnt/CC0E50740E505992/claude-cert/ccar-f`.
 
 ## 1. Gather (read, don't guess)
 
+All code comes from the user's POC path (see step 0).
+
 1. The script, whole.
 2. Every local module it imports (`common.py`, `tools.py`, …) — the article explains the parts the script depends on (options, tools, settings).
 3. Sibling scripts it references (e.g. an offline demo named in its docstring) and the folder `README.md`.
 4. `.env`: key NAMES only — print it with values masked (`sed 's/=.*/=<redacted>/'`); never read or quote values. Also `requirements.txt` for the SDK version.
 5. **Curriculum objectives:** `curriculum/<domain>/<NN>-raw-<Topic>.md` (and the `-revised-` file) for this topic. Map the POC folder name to it (`01-Agentic-Architecture-Orchestration/01-Agentic-Loops` → `curriculum/01-Agentic-Architecture-&-Orchestration/01-raw-Agentic-Loops.md`). These "Why:" lines are what the exam tests — the exam section is built from them.
-6. **Real run log:** the log file the user passed in `$ARGUMENTS` (mandatory, see step 0). Before reading, check size and grep for secrets (`grep -ciE 'sk-ant|api_key'`); if a hit, stop and tell the user. A `raw-poc/` script has no logging; its logged twin is the same path without `raw-poc/`. Read the twin's `log_model_io()` (usually in `common.py`) so you know which message class and field each log line tag comes from.
+6. **Real run log:** the log file the user passed in `$ARGUMENTS` (mandatory, see step 0). Before reading, check size and grep for secrets (`grep -ciE 'sk-ant|api_key'`); if a hit, stop and tell the user. Read the logging code in the user's POC folder (`setup_logging()`, `log_model_io()` — usually in `common.py` — and every `log.*` call) so you know which statement writes each log line tag, and from which message class and field. **Keep logging statements in code snippets:** they let a developer find the matching lines in the log file. Where a snippet has a logging call, name the log line tag it writes, and in the traces point each real log line back to the statement that wrote it. If the user's code has no logging, work the mapping out from the log lines themselves; don't go looking for a logged copy of the POC in another folder.
 
 ## 2. Verify claims against the real log
 

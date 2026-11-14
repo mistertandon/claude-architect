@@ -1,0 +1,11 @@
+# Secrets: every POC reads its API key from a local .env (commit only .env.example)
+.env
+
+# Python virtual environments and bytecode caches
+.venv/
+__pycache__/
+*.pyc
+
+# Runtime state written by POC runs
+batch_state.json
+work/

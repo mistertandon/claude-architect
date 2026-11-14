@@ -1,0 +1,283 @@
+02:26:18  MODEL INPUT   system       You are a code reviewer for the Fernway Outfitters order service. Review the TypeScript files below.
+REPORT only these categories:
+- bug: code that does the wrong thing, crashes or loses data for some input.
+- security: input or logs that can expose or change data they shouldn't, such as injection or leaked secrets.
+- comment_mismatch: any comment that is outdated, incomplete or could be clearer, including TODOs.
+SKIP, never report:
+- style preferences: naming, var versus let, formatting, nested ternaries, line length.
+- local patterns this codebase uses on purpose: `== null` to test null and undefined together, and `void` before a fire-and-forget call such as an audit log write.
+Severity is defined by these code patterns:
+<example severity="critical">exec("convert " + req.query.file + " thumb.png");  // user input reaches a shell</example>
+<example severity="critical">logger.debug("session", { token: session.accessToken });  // a secret in the logs</example>
+<example severity="major">const total = lines.reduce((sum, l) => sum + l.price);  // throws on an empty cart</example>
+<example severity="major">const body = JSON.parse(req.body);  // throws on any malformed request</example>
+<example severity="minor">// Orders of 10 items or more get a free tote.
+if (items.length > 10) addTote(order);</example>
+<example severity="minor">const day = new Date().getDay();  // weekday 0-6, printed as the day of the month</example>
+For each issue, give the file, the line number from the numbered listing, the category, the severity and a one-sentence description.
+02:26:18  MODEL INPUT   prompt       Review these 5 files of the order service.
+
+=== checkout.ts (20 lines) ===
+   1 | // checkout.ts - the checkout flow of the Fernway Outfitters order service
+   2 | import { auditLog } from "./audit";
+   3 | import { Cart, Order } from "./types";
+   4 | 
+   5 | export function shipIfPaid(order: Order): string {
+   6 |   if (order.status = "paid") {
+   7 |     return `Shipping order ${order.id}`;
+   8 |   }
+   9 |   return `Order ${order.id} awaits payment`;
+  10 | }
+  11 | 
+  12 | export function recordCheckout(orderId: string): void {
+  13 |   void auditLog.write({ orderId, event: "checkout" });
+  14 | }
+  15 | 
+  16 | export function addToCart(cart: Cart, sku: string, qty: number): Cart {
+  17 |   const line = cart.lines.find((l) => l.sku === sku);
+  18 |   line.quantity += qty;
+  19 |   return cart;
+  20 | }
+
+=== discounts.ts (17 lines) ===
+   1 | // discounts.ts - promo codes for the Fernway Outfitters order service
+   2 | const PROMO_CODES = ["TRAIL10", "SUMMIT15", "BASECAMP5"];
+   3 | 
+   4 | export function promoLabel(code: string): string {
+   5 |   const month = new Date().getMonth();
+   6 |   return `Promo ${code} for month ${month}`;
+   7 | }
+   8 | 
+   9 | export function isValidCode(code: string): boolean {
+  10 |   // TODO: load promo codes from the database
+  11 |   return PROMO_CODES.includes(code.trim().toUpperCase());
+  12 | }
+  13 | 
+  14 | /** Returns a sorted copy; the input array is not modified. */
+  15 | export function sortedCodes(codes: string[]): string[] {
+  16 |   return codes.sort();
+  17 | }
+
+=== inventory.ts (26 lines) ===
+   1 | // inventory.ts - stock levels for the Fernway Outfitters order service
+   2 | import { stockDb } from "./db";
+   3 | 
+   4 | async function isReserved(sku: string): Promise<boolean> {
+   5 |   return (await stockDb.reservations(sku)) > 0;
+   6 | }
+   7 | 
+   8 | export async function releaseIfFree(sku: string): Promise<string> {
+   9 |   if (isReserved(sku)) {
+  10 |     return `${sku} is reserved`;
+  11 |   }
+  12 |   await stockDb.release(sku);
+  13 |   return `${sku} released`;
+  14 | }
+  15 | 
+  16 | export function stockLabel(units: number): string {
+  17 |   return units === 0 ? "out" : units < 5 ? "low" : "ok";
+  18 | }
+  19 | 
+  20 | export function totalUnits(bins: { count: number }[]): number {
+  21 |   let total = 0;
+  22 |   for (let i = 0; i <= bins.length; i++) {
+  23 |     total += bins[i].count;
+  24 |   }
+  25 |   return total;
+  26 | }
+
+=== payments.ts (24 lines) ===
+   1 | // payments.ts - card charges for the Fernway Outfitters order service
+   2 | import { db } from "./db";
+   3 | 
+   4 | export interface Card { number: string; expiry: string; }
+   5 | 
+   6 | export async function findPayments(orderId: string) {
+   7 |   const sql = "SELECT * FROM payments WHERE order_id = '" + orderId + "'";
+   8 |   return db.query(sql);
+   9 | }
+  10 | 
+  11 | export async function chargeWithRetry(card: Card, amountCents: number): Promise<boolean> {
+  12 |   var attempts = 0;
+  13 |   while (attempts < 3) {
+  14 |     attempts += 1;
+  15 |     if (await db.charge(card, amountCents)) return true;
+  16 |   }
+  17 |   return false;
+  18 | }
+  19 | 
+  20 | /** Charges a card once. */
+  21 | export async function charge(card: Card, amountCents: number): Promise<boolean> {
+  22 |   console.log("charging card", card.number, amountCents);
+  23 |   return db.charge(card, amountCents);
+  24 | }
+
+=== shipping.ts (20 lines) ===
+   1 | // shipping.ts - shipping quotes for the Fernway Outfitters order service
+   2 | // Rates from the 2025 carrier contract.
+   3 | const ZONE_RATES: Record<string, number> = { west: 7.5, east: 9.0 };
+   4 | const DEFAULT_RATE = 12.0;
+   5 | const HANDLING = 1.5;
+   6 | 
+   7 | export function calc_rate(zone: string): number {
+   8 |   return ZONE_RATES[zone] ?? DEFAULT_RATE;
+   9 | }
+  10 | 
+  11 | /** Quote for one order; the zone may be missing for pickup orders. */
+  12 | export function shippingCost(zone: string | null, subtotal: number): number {
+  13 |   if (zone == null) return DEFAULT_RATE;
+  14 |   const rate = ZONE_RATES[zone] ?? DEFAULT_RATE;
+  15 |   const total = rate + HANDLING;
+  16 | 
+  17 |   // Orders of $50 or more ship free.
+  18 |   if (subtotal > 50) return 0;
+  19 |   return total;
+  20 | }
+02:26:26  MODEL OUTPUT  structured   {'findings': [{'file': 'checkout.ts', 'line': 6, 'category': 'bug', 'severity': 'major', 'description': 'Assignment `=` instead of comparison in `if (order.status = "paid")` overwrites the status and always ships the order.'}, {'file': 'checkout.ts', 'line': 18, 'category': 'bug', 'severity': 'major', 'description': '`find` returns undefined when the sku is not in the cart, so `line.quantity += qty` throws.'}, {'file': 'discounts.ts', 'line': 6, 'category': 'bug', 'severity': 'minor', 'description': '`getMonth()` is zero-based (0-11) so the label prints the wrong month number.'}, {'file': 'discounts.ts', 'line': 10, 'category': 'comment_mismatch', 'severity': 'minor', 'description': 'TODO to load promo codes from the database is unresolved while codes are hardcoded.'}, {'file': 'discounts.ts', 'line': 16, 'category': 'bug', 'severity': 'major', 'description': '`codes.sort()` sorts in place and mutates the input, contradicting the doc comment that says a copy is returned.'}, {'file': 'discounts.ts', 'line': 14, 'category': 'comment_mismatch', 'severity': 'minor', 'description': 'Doc comment claims the input array is not modified, but the implementation mutates it.'}, {'file': 'inventory.ts', 'line': 9, 'category': 'bug', 'severity': 'major', 'description': '`isReserved(sku)` is not awaited, so the Promise is always truthy and the SKU is always reported reserved and never released.'}, {'file': 'inventory.ts', 'line': 22, 'category': 'bug', 'severity': 'major', 'description': 'Loop condition `i <= bins.length` reads past the end and throws on `bins[i].count` for undefined.'}, {'file': 'payments.ts', 'line': 7, 'category': 'security', 'severity': 'critical', 'description': 'SQL built by concatenating orderId allows SQL injection; use parameterized queries.'}, {'file': 'payments.ts', 'line': 22, 'category': 'security', 'severity': 'critical', 'description': 'Logs the full card number in plaintext, leaking sensitive payment data.'}, {'file': 'payments.ts', 'line': 20, 'category': 'comment_mismatch', 'severity': 'minor', 'description': 'Doc comment is incomplete: it does not mention that the card number is logged or what the boolean result means.'}, {'file': 'payments.ts', 'line': 15, 'category': 'bug', 'severity': 'major', 'description': 'Retrying a charge up to 3 times without idempotency or error handling can double-charge the card if a charge succeeds but the response fails or throws.'}, {'file': 'shipping.ts', 'line': 13, 'category': 'bug', 'severity': 'major', 'description': 'Null zone returns DEFAULT_RATE before the free shipping check, so pickup orders of $50 or more are charged shipping and handling is skipped.'}, {'file': 'shipping.ts', 'line': 17, 'category': 'comment_mismatch', 'severity': 'minor', 'description': 'Comment says orders of $50 or more ship free but the code uses `> 50`, so exactly $50 is charged.'}, {'file': 'shipping.ts', 'line': 2, 'category': 'comment_mismatch', 'severity': 'minor', 'description': 'Comment about 2025 carrier contract rates is possibly outdated since the current date is 2026.'}]}  (id=toolu_01B3UyTsdu5cFtmjDaa3irjz)
+02:26:26  MODEL INPUT   tool_result  Structured output provided successfully  (tool_use_id=toolu_01B3UyTsdu5cFtmjDaa3irjz, is_error=None)
+02:26:26  MODEL OUTPUT  stop_reason  tool_use  (loop result: success)
+02:26:27  MODEL INPUT   system       You are a code reviewer for the Fernway Outfitters order service. Review the TypeScript files below.
+REPORT only these categories:
+- bug: code that does the wrong thing, crashes or loses data for some input.
+- security: input or logs that can expose or change data they shouldn't, such as injection or leaked secrets.
+- comment_mismatch: a comment whose claimed behaviour contradicts what the code actually does. Flag a comment only then; never a TODO, a note, or a comment that is merely out of date. For example, flag `// returns the price in dollars` above `return priceCents;`, but skip `// TODO: cache this` and `// limits from the 2024 policy`.
+SKIP, never report:
+- style preferences: naming, var versus let, formatting, nested ternaries, line length.
+- local patterns this codebase uses on purpose: `== null` to test null and undefined together, and `void` before a fire-and-forget call such as an audit log write.
+Severity is defined by these code patterns:
+<example severity="critical">exec("convert " + req.query.file + " thumb.png");  // user input reaches a shell</example>
+<example severity="critical">logger.debug("session", { token: session.accessToken });  // a secret in the logs</example>
+<example severity="major">const total = lines.reduce((sum, l) => sum + l.price);  // throws on an empty cart</example>
+<example severity="major">const body = JSON.parse(req.body);  // throws on any malformed request</example>
+<example severity="minor">// Orders of 10 items or more get a free tote.
+if (items.length > 10) addTote(order);</example>
+<example severity="minor">const day = new Date().getDay();  // weekday 0-6, printed as the day of the month</example>
+For each issue, give the file, the line number from the numbered listing, the category, the severity and a one-sentence description.
+02:26:27  MODEL INPUT   prompt       Review these 5 files of the order service.
+
+=== checkout.ts (20 lines) ===
+   1 | // checkout.ts - the checkout flow of the Fernway Outfitters order service
+   2 | import { auditLog } from "./audit";
+   3 | import { Cart, Order } from "./types";
+   4 | 
+   5 | export function shipIfPaid(order: Order): string {
+   6 |   if (order.status = "paid") {
+   7 |     return `Shipping order ${order.id}`;
+   8 |   }
+   9 |   return `Order ${order.id} awaits payment`;
+  10 | }
+  11 | 
+  12 | export function recordCheckout(orderId: string): void {
+  13 |   void auditLog.write({ orderId, event: "checkout" });
+  14 | }
+  15 | 
+  16 | export function addToCart(cart: Cart, sku: string, qty: number): Cart {
+  17 |   const line = cart.lines.find((l) => l.sku === sku);
+  18 |   line.quantity += qty;
+  19 |   return cart;
+  20 | }
+
+=== discounts.ts (17 lines) ===
+   1 | // discounts.ts - promo codes for the Fernway Outfitters order service
+   2 | const PROMO_CODES = ["TRAIL10", "SUMMIT15", "BASECAMP5"];
+   3 | 
+   4 | export function promoLabel(code: string): string {
+   5 |   const month = new Date().getMonth();
+   6 |   return `Promo ${code} for month ${month}`;
+   7 | }
+   8 | 
+   9 | export function isValidCode(code: string): boolean {
+  10 |   // TODO: load promo codes from the database
+  11 |   return PROMO_CODES.includes(code.trim().toUpperCase());
+  12 | }
+  13 | 
+  14 | /** Returns a sorted copy; the input array is not modified. */
+  15 | export function sortedCodes(codes: string[]): string[] {
+  16 |   return codes.sort();
+  17 | }
+
+=== inventory.ts (26 lines) ===
+   1 | // inventory.ts - stock levels for the Fernway Outfitters order service
+   2 | import { stockDb } from "./db";
+   3 | 
+   4 | async function isReserved(sku: string): Promise<boolean> {
+   5 |   return (await stockDb.reservations(sku)) > 0;
+   6 | }
+   7 | 
+   8 | export async function releaseIfFree(sku: string): Promise<string> {
+   9 |   if (isReserved(sku)) {
+  10 |     return `${sku} is reserved`;
+  11 |   }
+  12 |   await stockDb.release(sku);
+  13 |   return `${sku} released`;
+  14 | }
+  15 | 
+  16 | export function stockLabel(units: number): string {
+  17 |   return units === 0 ? "out" : units < 5 ? "low" : "ok";
+  18 | }
+  19 | 
+  20 | export function totalUnits(bins: { count: number }[]): number {
+  21 |   let total = 0;
+  22 |   for (let i = 0; i <= bins.length; i++) {
+  23 |     total += bins[i].count;
+  24 |   }
+  25 |   return total;
+  26 | }
+
+=== payments.ts (24 lines) ===
+   1 | // payments.ts - card charges for the Fernway Outfitters order service
+   2 | import { db } from "./db";
+   3 | 
+   4 | export interface Card { number: string; expiry: string; }
+   5 | 
+   6 | export async function findPayments(orderId: string) {
+   7 |   const sql = "SELECT * FROM payments WHERE order_id = '" + orderId + "'";
+   8 |   return db.query(sql);
+   9 | }
+  10 | 
+  11 | export async function chargeWithRetry(card: Card, amountCents: number): Promise<boolean> {
+  12 |   var attempts = 0;
+  13 |   while (attempts < 3) {
+  14 |     attempts += 1;
+  15 |     if (await db.charge(card, amountCents)) return true;
+  16 |   }
+  17 |   return false;
+  18 | }
+  19 | 
+  20 | /** Charges a card once. */
+  21 | export async function charge(card: Card, amountCents: number): Promise<boolean> {
+  22 |   console.log("charging card", card.number, amountCents);
+  23 |   return db.charge(card, amountCents);
+  24 | }
+
+=== shipping.ts (20 lines) ===
+   1 | // shipping.ts - shipping quotes for the Fernway Outfitters order service
+   2 | // Rates from the 2025 carrier contract.
+   3 | const ZONE_RATES: Record<string, number> = { west: 7.5, east: 9.0 };
+   4 | const DEFAULT_RATE = 12.0;
+   5 | const HANDLING = 1.5;
+   6 | 
+   7 | export function calc_rate(zone: string): number {
+   8 |   return ZONE_RATES[zone] ?? DEFAULT_RATE;
+   9 | }
+  10 | 
+  11 | /** Quote for one order; the zone may be missing for pickup orders. */
+  12 | export function shippingCost(zone: string | null, subtotal: number): number {
+  13 |   if (zone == null) return DEFAULT_RATE;
+  14 |   const rate = ZONE_RATES[zone] ?? DEFAULT_RATE;
+  15 |   const total = rate + HANDLING;
+  16 | 
+  17 |   // Orders of $50 or more ship free.
+  18 |   if (subtotal > 50) return 0;
+  19 |   return total;
+  20 | }
+02:26:33  MODEL OUTPUT  structured   {'findings': [{'file': 'checkout.ts', 'line': 6, 'category': 'bug', 'severity': 'major', 'description': 'Assignment `=` instead of comparison in the if condition sets status to "paid" and is always truthy, so every order ships and gets mutated.'}, {'file': 'checkout.ts', 'line': 18, 'category': 'bug', 'severity': 'major', 'description': '`line` is undefined when the sku is not already in the cart, so `line.quantity += qty` throws a TypeError.'}, {'file': 'discounts.ts', 'line': 6, 'category': 'bug', 'severity': 'minor', 'description': 'getMonth() is zero-based, so the label shows months 0-11 rather than the calendar month number.'}, {'file': 'discounts.ts', 'line': 14, 'category': 'comment_mismatch', 'severity': 'minor', 'description': "Comment says it returns a sorted copy and doesn't modify the input, but `codes.sort()` sorts the input array in place and returns it."}, {'file': 'inventory.ts', 'line': 9, 'category': 'bug', 'severity': 'major', 'description': 'isReserved returns a Promise that is not awaited, so the condition is always truthy and stock is never released.'}, {'file': 'inventory.ts', 'line': 22, 'category': 'bug', 'severity': 'major', 'description': 'Loop condition `i <= bins.length` reads past the end, so bins[i] is undefined and `.count` throws a TypeError.'}, {'file': 'payments.ts', 'line': 7, 'category': 'security', 'severity': 'critical', 'description': 'orderId is concatenated into the SQL string, allowing SQL injection; use a parameterized query.'}, {'file': 'payments.ts', 'line': 22, 'category': 'security', 'severity': 'critical', 'description': 'The full card number is written to the logs.'}, {'file': 'shipping.ts', 'line': 18, 'category': 'comment_mismatch', 'severity': 'minor', 'description': 'Comment says orders of $50 or more ship free, but `subtotal > 50` excludes exactly $50.'}]}  (id=toolu_01PqwqKcRMatWWt6JfvbPCN7)
+02:26:33  MODEL INPUT   tool_result  Structured output provided successfully  (tool_use_id=toolu_01PqwqKcRMatWWt6JfvbPCN7, is_error=None)
+02:26:33  MODEL OUTPUT  stop_reason  tool_use  (loop result: success)
+02:26:34  category bug              8 finding(s), 2 false positive(s) = 25% -> kept
+02:26:34  category comment_mismatch 5 finding(s), 2 false positive(s) = 40% -> DISABLED
+02:26:34  category security         2 finding(s), 0 false positive(s) = 0% -> kept
+02:26:34  developer sees: before 4/15 false positives (27%), after 2/10 (20%); runs still showing one: 1
+02:26:34  collateral (real defects hidden while disabled): ['R9']
+02:26:34  comment_mismatch: 40% false positives ['D4', 'D6']. Refinement: Use the contradiction-only rule and add code examples of comments to flag and to skip (TODOs, dated notes). Plan: re-enable when the refined criteria score at most 10% false positives in this category and still find its real defects.
+02:26:34  re-enable comment_mismatch: yes (refined run: 0/2 false positives; real defects found: ['R1', 'R2', 'R3', 'R4', 'R5', 'R6', 'R7', 'R8', 'R9'])

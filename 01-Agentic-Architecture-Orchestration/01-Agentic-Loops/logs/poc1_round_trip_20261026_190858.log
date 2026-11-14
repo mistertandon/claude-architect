@@ -1,0 +1,15 @@
+19:08:58  MODEL INPUT   prompt       What is 1,234 multiplied by 5,678?
+19:09:01  MODEL OUTPUT  tool_use     mcp__poc__calculator {'expression': '1234 * 5678'}  (id=toolu_01G7RBxJCoT3WK7qkuif1Vw3)
+19:09:01  MODEL INPUT   tool_result  [{'type': 'text', 'text': '7006652'}]  (tool_use_id=toolu_01G7RBxJCoT3WK7qkuif1Vw3, is_error=None)
+19:09:02  MODEL OUTPUT  text         1,234 × 5,678 = **7,006,652**
+19:09:02  MODEL OUTPUT  stop_reason  end_turn  (loop result: success)
+19:09:04  MODEL INPUT   prompt       What is Nimbus Robotics' share price right now?
+19:09:07  MODEL OUTPUT  tool_use     mcp__poc__web_search {'query': 'Nimbus Robotics share price'}  (id=toolu_017r3Mx5tujEaF8jgctDgRXu)
+19:09:07  MODEL INPUT   tool_result  [{'type': 'text', 'text': 'Nimbus Robotics shares last traded at $187.42.'}]  (tool_use_id=toolu_017r3Mx5tujEaF8jgctDgRXu, is_error=None)
+19:09:09  MODEL OUTPUT  text         Nimbus Robotics shares last traded at **$187.42**.
+
+The search result gave only the last trade price. It had no timestamp, so I can't say how current it is. It may not be a live quote. Check a brokerage or financial site such as Google Finance or Yahoo Finance if you need a real-time price.
+19:09:09  MODEL OUTPUT  stop_reason  end_turn  (loop result: success)
+19:09:11  MODEL INPUT   prompt       In one sentence, what is an API?
+19:09:13  MODEL OUTPUT  text         An API (Application Programming Interface) is a set of rules and endpoints that lets one piece of software request data or services from another without needing to know how it works internally.
+19:09:13  MODEL OUTPUT  stop_reason  end_turn  (loop result: success)

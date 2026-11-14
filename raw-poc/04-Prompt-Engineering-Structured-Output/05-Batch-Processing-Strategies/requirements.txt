@@ -1,0 +1,2 @@
+python-dotenv>=1.0.0  # loads the settings from .env
+anthropic>=2.0        # the Messages API client: the Message Batches API is not in the Agent SDK

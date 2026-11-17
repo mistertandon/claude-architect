@@ -1133,59 +1133,313 @@ Each trace below is the real run from `logs/poc2_refinement_20261027_183353.log`
 **Real log (condensed):**
 
 ```
-── decompose() ─────────────────────────────────────────────────────────────────────────────────────
-18:35:48  MODEL INPUT   prompt       [coordinator] Decompose this research topic into subtopics. Do not delegate yet. Topic: renewable energy technologies
-18:35:52  MODEL OUTPUT  structured   [coordinator] {'subtopics': ['Solar photovoltaic (PV) technologies', 'Concentrated solar power and solar thermal',
-                                     'Onshore and offshore wind power', 'Hydropower and pumped storage', 'Bioenergy and biofuels', 'Geothermal energy',
-                                     'Marine energy (wave, tidal, ocean thermal)', 'Green hydrogen and renewable-derived fuels', 'Emerging and
-                                     experimental renewables (airborne wind, space-based solar, perovskite tandem cells, artificial photosynthesis)']}
-                                     (id=toolu_01F9qpL5tPaCFmH4S75T36KA)
+── decompose() ───────────────────────────────────────────────────────────────────────────
 
-── round 1 ─────────────────────────────────────────────────────────────────────────────────────────
-18:35:58  MODEL OUTPUT  tool_use     [coordinator] Agent {... 'web-searcher' ... 1. Solar photovoltaic (PV) technologies ... 9. Emerging and
-                                     experimental renewables (...) ...}  (id=toolu_019JgLABXyi2o3PwArkwypVL)
-18:35:59  ... 9 × web_search [web-searcher]; 'Green hydrogen and renewable-derived fuels' → "No Helios results ..."; 'Emerging ...
-              (airborne wind, space-based solar, ...)' → the solar AND the wind lines ...
-18:36:11  MODEL OUTPUT  tool_use     [coordinator] Agent {... 'doc-analyst' ... HX-SOL-7 ..., HX-WND-2 ..., HX-HYD-5 ..., HX-BIO-6 ...,
-                                     HX-GEO-3 ..., HX-TID-4 ...}  (id=toolu_01U16QxjRgjYJoaBfpRTSQo1)
-18:36:14  ... 6 × read_document [doc-analyst], all is_error=None ...
-18:36:29  MODEL OUTPUT  structured   [coordinator] {'sections': [ ...9 sections... ]}
-18:36:41  MODEL OUTPUT  thinking     [coordinator] ... Fusion appears to be missing from the emerging section entirely ... For CSP specifically, the
-                                     cited source doesn't actually address it ... I'm leaning toward calling it "partial" ...
-18:36:42  MODEL OUTPUT  structured   [coordinator] {'coverage': [ ...11 entries... ]}  (id=toolu_01WrzqdnBAT4KmbQaznFiVZd)
-18:36:43  iteration 1: delegated 9 -> coverage 55% -> gaps ['Fusion', 'Concentrated solar power and solar thermal', 'Wave and ocean thermal energy',
-          'Green hydrogen and renewable-derived fuels', 'Emerging and experimental renewables (airborne wind, space-based solar, perovskite tandem,
-          artificial photosynthesis)']
+18:35:48  MODEL INPUT   prompt       [coordinator]
+          Decompose this research topic into subtopics. Do not delegate yet. Topic:
+            renewable energy technologies
 
-── round 2 ─────────────────────────────────────────────────────────────────────────────────────────
-18:36:43  MODEL INPUT   prompt       [coordinator] ... Fix only these gaps:
-                                     - Fusion: This is a must-cover item, but no section exists for it. ...
-                                     - Concentrated solar power and solar thermal: A section exists, but its only source is the generic solar
-                                       document HX-SOL-7, which doesn't mention CSP or solar thermal. ...
-                                     - Wave and ocean thermal energy: The marine section covers tidal only. ...  (+ 2 more)
-18:36:49  ... 5 × web_search: fusion → HX-FUS-1; CSP → HX-SOL-7 again; wave → HX-TID-4 again; green hydrogen → no results;
-              emerging → solar + wind lines again ...
-18:37:01  ... 4 × read_document: HX-FUS-1, HX-TID-4, HX-SOL-7, HX-WND-2 ...
-18:37:12  MODEL OUTPUT  structured   [coordinator] {'sections': [{'subtopic': 'Fusion', ..., 'sources': ['HX-FUS-1']}, ...5 sections... ]}
-18:37:20  MODEL OUTPUT  structured   [coordinator] {'coverage': [ ...11 entries; Fusion: 'partial' ... ]}  (id=toolu_01KBwqW3peMZdD9fUZTCVy5o)
-18:37:21  iteration 2: delegated 5 -> coverage 55% -> gaps ['Concentrated solar power and solar thermal', 'Fusion', 'Wave and ocean thermal energy',
-          'Green hydrogen and renewable-derived fuels', 'Emerging and experimental renewables (...)']
+18:35:52  MODEL OUTPUT  structured   [coordinator]
+          {'subtopics': [
+              'Solar photovoltaic (PV) technologies',
+              'Concentrated solar power and solar thermal',
+              'Onshore and offshore wind power',
+              'Hydropower and pumped storage',
+              'Bioenergy and biofuels',
+              'Geothermal energy',
+              'Marine energy (wave, tidal, ocean thermal)',
+              'Green hydrogen and renewable-derived fuels',
+              'Emerging and experimental renewables (airborne wind, space-based solar,
+                  perovskite tandem cells, artificial photosynthesis)'
+          ]}
+          (id=toolu_01F9qpL5tPaCFmH4S75T36KA)
 
-── round 3 ─────────────────────────────────────────────────────────────────────────────────────────
-18:37:26  MODEL OUTPUT  tool_use     [coordinator] Agent {... 'web-searcher' ... 2. Fusion (existing source HX-FUS-1 with a 140 MW pilot by 2034
-                                     finding; please verify the claim that 'Aurora-3 sustained 412 seconds' and who it is attributed to) ...}
-18:37:28  ... 5 × web_search; 'emerging and experimental renewables' → "No Helios results ..." ...
-18:37:37  MODEL OUTPUT  thinking     [coordinator] I'll delegate to doc-analyst to read HX-FUS-1, since it's the only new relevant document —
-                                     HX-SOL-7 and HX-TID-4 are already known not to cover this.
-18:37:38  MODEL OUTPUT  tool_use     [coordinator] Agent {... 'doc-analyst' ... read document HX-FUS-1 ... Specifically verify: (a) the Aurora-3 ...}
-18:37:39  MODEL OUTPUT  tool_use     [doc-analyst] mcp__research__read_document {'doc_id': 'HX-FUS-1'}  (id=toolu_01253iVdof9iRjwWwnRETLhV)
-18:37:49  MODEL OUTPUT  structured   [coordinator] {'sections': [ ...5 sections; CSP, wave, green hydrogen, emerging all 'sources': []... ]}
-18:38:04  MODEL OUTPUT  structured   [coordinator] {'coverage': [ ...11 entries; Fusion: 'well_covered' ... ]}  (id=toolu_01ByeuBT8VroFu5cZRF4RWMC)
-18:38:05  iteration 3: delegated 5 -> coverage 64% -> gaps ['Concentrated solar power and solar thermal', 'Wave and ocean thermal (OTEC) energy',
-          'Green hydrogen and renewable-derived fuels', 'Emerging and experimental renewables (...)']
-18:38:05  Coverage 64% after 3 iteration(s); gaps: [ ...the same 4... ]
-18:38:05  Never delegated in round 1: ['fusion'] -> root cause: the coordinator's decomposition, not the subagents
-18:38:05  Run 'full': dispatcher 55% -> coordinator 64% after 3 round(s), categories still missing: []
+── round 1 ───────────────────────────────────────────────────────────────────────────────
+
+18:35:58  MODEL OUTPUT  tool_use     [coordinator]
+          Agent {'description': 'Find Helios sources', 'subagent_type': 'web-searcher',
+                 'prompt': 'Research goal: ... Find Helios Institute sources for each of
+                     these exact subtopics, ...\n
+                     1. Solar photovoltaic (PV) technologies\n
+                     ...\n
+                     9. Emerging and experimental renewables (airborne wind, space-based
+                       solar, perovskite tandem cells, artificial photosynthesis)\n
+                     Report per subtopic: document id, key figure, and say explicitly if
+                       no source was found.'}
+          (id=toolu_019JgLABXyi2o3PwArkwypVL)
+
+18:35:59  ... 9 × web_search [web-searcher] and their tool_results, all is_error=None:
+              'Solar photovoltaic (PV) technologies' → HX-SOL-7
+              'Concentrated solar power and solar thermal' → HX-SOL-7
+              'Onshore and offshore wind power' → HX-WND-2
+              'Hydropower and pumped storage' → HX-HYD-5
+              'Bioenergy and biofuels' → HX-BIO-6
+              'Geothermal energy' → HX-GEO-3
+              'Marine energy (wave, tidal, ocean thermal)' → HX-TID-4
+              'Green hydrogen and renewable-derived fuels' → "No Helios results for 'Green
+                  hydrogen and renewable-derived fuels'."
+              'Emerging and experimental renewables (airborne wind, space-based solar,
+                  perovskite tandem cells, artificial photosynthesis)' → HX-SOL-7,
+                  HX-WND-2
+
+18:36:11  MODEL OUTPUT  tool_use     [coordinator]
+          Agent {'description': 'Read Helios documents', 'subagent_type': 'doc-analyst',
+                 'prompt': 'Research goal: ... Read each of these Helios documents by
+                     exact id and extract key figures, noting which subtopic each covers
+                     and whether it actually addresses the specifics listed:\n
+                     - HX-SOL-7 (subtopics: "Solar photovoltaic (PV) technologies"; also a
+                       loose match for "Concentrated solar power and solar thermal" and
+                       "Emerging and experimental renewables (airborne wind, space-based
+                       solar, perovskite tandem cells, artificial photosynthesis)").
+                       Earlier search figure: solar capacity grew 31% in 2025.\n
+                     ...\n
+                     Report per document: key figures, and any explicit mention of
+                       CSP/solar thermal, onshore wind, pumped storage, biofuels, wave,
+                       ocean thermal, airborne wind, space solar, perovskite tandem,
+                       artificial photosynthesis.'}
+          (id=toolu_01U16QxjRgjYJoaBfpRTSQo1)
+
+18:36:14  ... 6 × read_document [doc-analyst] and their tool_results, all is_error=None:
+              'HX-SOL-7' → utility-scale cost fell to $27.40/MWh.
+              'HX-WND-2' → the average capacity factor reached 41.3%.
+              'HX-HYD-5' → pumped-storage capacity rose to 212 GW.
+              'HX-BIO-6' → waste feedstocks made up 63% of supply.
+              'HX-GEO-3' → enhanced-geothermal pilot wells reached 245 °C.
+              'HX-TID-4' → the Kestrel Strait array ran at a 37.5% capacity factor.
+
+18:36:29  MODEL OUTPUT  structured   [coordinator]
+          {'sections': [
+              {'subtopic': 'Solar photovoltaic (PV) technologies',
+               'web_findings': 'HX-SOL-7: search snippet said solar capacity grew 31% in
+                   2025.',
+               'document_findings': 'HX-SOL-7 read: utility-scale cost fell to $27.40/MWh.
+                   The 31% growth figure was not found in the ...',
+               'sources': ['HX-SOL-7']},
+              {'subtopic': 'Concentrated solar power and solar thermal',
+               'web_findings': 'Only a loose match: HX-SOL-7 general solar result;
+                   CSP/solar thermal not mentioned.',
+               'document_findings': 'HX-SOL-7 does not mention CSP or solar thermal. No
+                   dedicated source: coverage gap.',
+               'sources': ['HX-SOL-7']},
+              ... 7 more; 'Green hydrogen ...' and 'Emerging ...' have 'sources': [] ...
+          ]}
+          (id=toolu_01HDUZ3fVAwQfhyBmJxBozwR)
+
+18:36:41  MODEL OUTPUT  thinking     [coordinator]
+          ... Fusion appears to be missing from the emerging section entirely, ...
+          For CSP specifically, the cited source doesn't actually address it, ... I'm
+            leaning toward calling it "partial" ...
+
+18:36:42  MODEL OUTPUT  structured   [coordinator]
+          {'coverage': [
+              {'subtopic': 'Solar (photovoltaic)', 'status': 'well_covered', ...},
+              {'subtopic': 'Wind (onshore and offshore)', 'status': 'well_covered', ...},
+              {'subtopic': 'Geothermal', 'status': 'well_covered', ...},
+              {'subtopic': 'Tidal', 'status': 'well_covered', ...},
+              {'subtopic': 'Biomass / bioenergy', 'status': 'well_covered', ...},
+              {'subtopic': 'Fusion', 'status': 'missing',
+               'reason': "This is a must-cover item, but no section exists for it. The
+                   emerging-technologies section doesn't mention fusion, and no source was
+                   searched or read."},
+              {'subtopic': 'Hydropower and pumped storage', 'status': 'well_covered',
+               ...},
+              {'subtopic': 'Concentrated solar power and solar thermal',
+               'status': 'partial',
+               'reason': "A section exists, but its only source is the generic solar
+                   document HX-SOL-7, which doesn't mention CSP or solar thermal. It has
+                   no real CSP findings and needs a ..."},
+              {'subtopic': 'Wave and ocean thermal energy', 'status': 'missing', ...},
+              {'subtopic': 'Green hydrogen and renewable-derived fuels',
+               'status': 'missing', ...},
+              {'subtopic': 'Emerging and experimental renewables (airborne wind ...',
+               'status': 'missing', ...}
+          ]}
+          (id=toolu_01WrzqdnBAT4KmbQaznFiVZd)
+
+18:36:43  iteration 1: delegated 9 -> coverage 55% -> gaps ['Fusion', 'Concentrated solar
+            power and solar thermal', 'Wave and ocean thermal energy', 'Green hydrogen and
+            renewable-derived fuels', 'Emerging and experimental renewables (airborne
+            wind, space-based solar, perovskite tandem, artificial photosynthesis)']
+
+── round 2 ───────────────────────────────────────────────────────────────────────────────
+
+18:36:43  MODEL INPUT   prompt       [coordinator]
+          Research goal: ...
+          Subtopics for this round (delegate only these, using these exact names) ...
+          Fix only these gaps:
+          - Fusion: This is a must-cover item, but no section exists for it. The
+            emerging-technologies section doesn't mention fusion, and no source was ...
+          - Concentrated solar power and solar thermal: A section exists, but its only
+            source is the generic solar document HX-SOL-7, which doesn't mention CSP ...
+          - Wave and ocean thermal energy: The marine section covers tidal only. Wave and
+            ocean thermal energy have no findings and no sources.
+          - Green hydrogen and renewable-derived fuels: The section is empty. It has no
+            web findings, no document and no source id.
+          - Emerging and experimental renewables (airborne wind, space-based solar,
+            perovskite tandem, artificial photosynthesis): The section is empty. It has
+            ...
+          Delegate with one Agent call ...
+
+18:36:49  ... 5 × web_search [web-searcher] and their tool_results, all is_error=None:
+              'fusion' → HX-FUS-1
+              'concentrated solar power and solar thermal' → HX-SOL-7
+              'wave and ocean thermal energy' → HX-TID-4
+              'green hydrogen and renewable-derived fuels' → "No Helios results for 'green
+                  hydrogen and renewable-derived fuels'."
+              'emerging and experimental renewables airborne wind, space-based solar,
+                  perovskite tandem, artificial photosynthesis' → HX-SOL-7, HX-WND-2
+
+18:37:01  ... 4 × read_document [doc-analyst] and their tool_results, all is_error=None:
+              'HX-FUS-1' → a 140 MW grid pilot is planned for 2034.
+              'HX-TID-4' → the Kestrel Strait array ran at a 37.5% capacity factor.
+              'HX-SOL-7' → utility-scale cost fell to $27.40/MWh.
+              'HX-WND-2' → the average capacity factor reached 41.3%.
+
+18:37:12  MODEL OUTPUT  structured   [coordinator]
+          {'sections': [
+              {'subtopic': 'Fusion',
+               'web_findings': 'Search found dedicated source HX-FUS-1. Search line:
+                   Aurora-3 test reactor held plasma for 412 seconds (Helios Review
+                   2026).',
+               'document_findings': 'HX-FUS-1 states a 140 MW grid pilot is planned for
+                   2034. The document did not confirm the Aurora-3 412-second figure or
+                   the Helios Review ...',
+               'sources': ['HX-FUS-1']},
+              ... 4 more sections (CSP, wave and ocean thermal, green hydrogen, emerging),
+                  each saying 'Gap remains' ...
+          ]}
+          (id=toolu_016DFodfNrTHZvLoQnF7wgry)
+
+18:37:20  MODEL OUTPUT  structured   [coordinator]
+          {'coverage': [
+              {'subtopic': 'Solar (photovoltaic)', 'status': 'well_covered', ...},
+              {'subtopic': 'Concentrated solar power and solar thermal',
+               'status': 'partial', ...},
+              {'subtopic': 'Wind (onshore and offshore)', 'status': 'well_covered', ...},
+              {'subtopic': 'Geothermal', 'status': 'well_covered', ...},
+              {'subtopic': 'Tidal / marine energy', 'status': 'well_covered', ...},
+              {'subtopic': 'Biomass / bioenergy', 'status': 'well_covered', ...},
+              {'subtopic': 'Fusion', 'status': 'partial',
+               'reason': 'Section has a source (HX-FUS-1) and a 140 MW pilot by 2034
+                   finding, but the Aurora-3 412-second web claim and its attribution are
+                   unverified.'},
+              {'subtopic': 'Hydropower and pumped storage', 'status': 'well_covered',
+               ...},
+              {'subtopic': 'Wave and ocean thermal energy', 'status': 'partial', ...},
+              {'subtopic': 'Green hydrogen and renewable-derived fuels',
+               'status': 'partial', ...},
+              {'subtopic': 'Emerging and experimental renewables (airborne wind ...',
+               'status': 'partial', ...}
+          ]}
+          (id=toolu_01KBwqW3peMZdD9fUZTCVy5o)
+
+18:37:21  iteration 2: delegated 5 -> coverage 55% -> gaps ['Concentrated solar power and
+            solar thermal', 'Fusion', 'Wave and ocean thermal energy', 'Green hydrogen and
+            renewable-derived fuels', 'Emerging and experimental renewables (airborne
+            wind, space-based solar, perovskite tandem, artificial photosynthesis)']
+
+── round 3 ───────────────────────────────────────────────────────────────────────────────
+
+18:37:26  MODEL OUTPUT  tool_use     [coordinator]
+          Agent {'description': 'Find Helios sources', 'subagent_type': 'web-searcher',
+                 'prompt': 'Research goal: a sourced overview of "renewable energy
+                     technologies" with key figures from Helios Institute sources. Find
+                     Helios Institute sources (document ids) for each of these exact
+                     subtopics:\n
+                     1. Concentrated solar power and solar thermal (previous source
+                       HX-SOL-7 does not mention CSP; find a real CSP source)\n
+                     2. Fusion (existing source HX-FUS-1 with a 140 MW pilot by 2034
+                       finding; please verify the claim that \'Aurora-3 sustained 412
+                       seconds\' and who it is attributed to)\n
+                     3. Wave and ocean thermal energy (previous source HX-TID-4 is tidal
+                       only; find wave/OTEC sources)\n
+                     4. Green hydrogen and renewable-derived fuels (no source yet)\n
+                     5. Emerging and experimental renewables (airborne wind, space-based
+                       solar, perovskite tandem, artificial photosynthesis) (previous
+                       sources HX-WND-2, HX-SOL-7 do not mention these)\n
+                     For each subtopic report the document id(s), the key figure from the
+                       search result line, and the exact wording. Say clearly if nothing
+                       relevant is found; do not invent ids.'}
+          (id=toolu_01WSvGRvAyHj3niNFn4Zk79x)
+
+18:37:28  ... 5 × web_search [web-searcher] and their tool_results, all is_error=None:
+              'concentrated solar power and solar thermal' → HX-SOL-7
+              'fusion' → HX-FUS-1
+              'wave and ocean thermal energy' → HX-TID-4
+              'green hydrogen and renewable-derived fuels' → "No Helios results for 'green
+                  hydrogen and renewable-derived fuels'."
+              'emerging and experimental renewables' → "No Helios results for 'emerging
+                  and experimental renewables'."
+
+18:37:37  MODEL OUTPUT  thinking     [coordinator]
+          I'll delegate to doc-analyst to read HX-FUS-1, since it's the only new relevant
+            document — HX-SOL-7 and HX-TID-4 are already known not to cover this.
+
+18:37:38  MODEL OUTPUT  tool_use     [coordinator]
+          Agent {'description': 'Read fusion document', 'subagent_type': 'doc-analyst',
+                 'prompt': 'Research goal: sourced overview of renewable energy
+                     technologies with key figures from Helios Institute sources.
+                     Subtopic: "Fusion". Please read document HX-FUS-1 and report its key
+                     figures. Specifically verify: (a) the Aurora-3 test reactor plasma
+                     duration (a search line said \'held plasma for 412 seconds\', Helios
+                     Review 2026) and who/what organisation it is attributed to; (b) a
+                     claimed 140 MW pilot by 2034. Quote exact wording, and state clearly
+                     anything not found in the document.'}
+          (id=toolu_01HTM64aYD2Xo4uPCRxKdmrx)
+
+18:37:39  ... 1 × read_document [doc-analyst] and their tool_results, all is_error=None:
+              'HX-FUS-1' → a 140 MW grid pilot is planned for 2034.
+
+18:37:49  MODEL OUTPUT  structured   [coordinator]
+          {'sections': [
+              {'subtopic': 'Concentrated solar power and solar thermal', ...,
+               'sources': []},
+              {'subtopic': 'Fusion', ..., 'sources': ['HX-FUS-1']},
+              {'subtopic': 'Wave and ocean thermal energy', ..., 'sources': []},
+              {'subtopic': 'Green hydrogen and renewable-derived fuels', ...,
+               'sources': []},
+              {'subtopic': 'Emerging and experimental renewables (airborne wind ...', ...,
+               'sources': []}
+          ]}
+          (id=toolu_01VJDCXFhs7qE15tUF9AfqQr)
+
+18:38:04  MODEL OUTPUT  structured   [coordinator]
+          {'coverage': [
+              {'subtopic': 'Solar (photovoltaic)', 'status': 'well_covered', ...},
+              {'subtopic': 'Concentrated solar power and solar thermal',
+               'status': 'missing', ...},
+              {'subtopic': 'Wind (onshore and offshore)', 'status': 'well_covered', ...},
+              {'subtopic': 'Geothermal', 'status': 'well_covered', ...},
+              {'subtopic': 'Tidal', 'status': 'well_covered', ...},
+              {'subtopic': 'Biomass (bioenergy and biofuels)', 'status': 'well_covered',
+               ...},
+              {'subtopic': 'Fusion', 'status': 'well_covered',
+               'reason': 'Has web findings, document findings and source HX-FUS-1. The
+                   document only says a 140 MW grid pilot is planned for 2034. The
+                   Aurora-3 412-second plasma claim rests on ...'},
+              {'subtopic': 'Hydropower and pumped storage', 'status': 'well_covered',
+               ...},
+              {'subtopic': 'Wave and ocean thermal (OTEC) energy', 'status': 'missing',
+               ...},
+              {'subtopic': 'Green hydrogen and renewable-derived fuels',
+               'status': 'missing', ...},
+              {'subtopic': 'Emerging and experimental renewables (airborne wind ...',
+               'status': 'missing', ...}
+          ]}
+          (id=toolu_01ByeuBT8VroFu5cZRF4RWMC)
+
+18:38:05  iteration 3: delegated 5 -> coverage 64% -> gaps ['Concentrated solar power and
+            solar thermal', 'Wave and ocean thermal (OTEC) energy', 'Green hydrogen and
+            renewable-derived fuels', 'Emerging and experimental renewables (airborne
+            wind, space-based solar, perovskite tandem, artificial photosynthesis)']
+18:38:05  Coverage 64% after 3 iteration(s); gaps: ['Concentrated solar power and solar
+            thermal', 'Wave and ocean thermal (OTEC) energy', 'Green hydrogen and
+            renewable-derived fuels', 'Emerging and experimental renewables (airborne
+            wind, space-based solar, perovskite tandem, artificial photosynthesis)']
+18:38:05  Never delegated in round 1: ['fusion'] -> root cause: the coordinator's
+            decomposition, not the subagents
+18:38:05  Run 'full': dispatcher 55% -> coordinator 64% after 3 round(s), categories still
+            missing: []
 ```
 
 **The 11 rated categories, round by round** (from the three `coverage` lines):

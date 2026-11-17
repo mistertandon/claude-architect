@@ -780,66 +780,224 @@ Each trace below is the real run from `logs/poc2_refinement_20261027_183353.log`
 **Real log (condensed):**
 
 ```
-── round 1 ─────────────────────────────────────────────────────────────────────────────────────────
-18:33:53  MODEL INPUT   prompt       [coordinator] Research goal: ... Subtopics for this round (delegate only these, using these exact
-                                     names): ["solar power", "wind power"]  Delegate with one Agent call ...
-18:33:57  MODEL OUTPUT  tool_use     [coordinator] Agent {'description': 'Find sources', 'subagent_type': 'web-searcher', 'prompt': 'Research
-                                     goal: ... Find Helios Institute sources for exactly these subtopics: "solar power" and "wind power". ...'}
-                                     (id=toolu_01YH3adjwNbSjQYi4MTTj12i)
-18:33:58  MODEL OUTPUT  tool_use     [web-searcher] mcp__research__web_search {'query': 'solar power'}  (id=toolu_01HjMNPbE3tYksZwUcuoP6Yz)
-18:33:58  MODEL OUTPUT  tool_use     [web-searcher] mcp__research__web_search {'query': 'wind power'}  (id=toolu_01JScEEqtvP1zpyjwhUgWz8d)
-18:34:00  MODEL INPUT   tool_result  [coordinator] [{'type': 'text', 'text': "[Subagent hand-back] ... **Solar power** ... HX-SOL-7 ...
-                                     **Wind power** ... HX-WND-2 ... <usage>subagent_tokens: 1896\ntool_uses: 2\nduration_ms: 3272</usage>"}]
-                                     (tool_use_id=toolu_01YH3adjwNbSjQYi4MTTj12i, is_error=None)
-18:34:03  MODEL OUTPUT  tool_use     [coordinator] Agent {'description': 'Read documents', 'subagent_type': 'doc-analyst', 'prompt': '...
-                                     "solar power" -> HX-SOL-7 ...; "wind power" -> HX-WND-2 ...'}  (id=toolu_016V8VNqRXpPncQGUCiyE95d)
-18:34:05  MODEL OUTPUT  tool_use     [doc-analyst] mcp__research__read_document {'doc_id': 'HX-SOL-7'}  (id=toolu_01YZ2z7yAuQ7RAHzs9LnquSP)
-18:34:05  MODEL OUTPUT  tool_use     [doc-analyst] mcp__research__read_document {'doc_id': 'HX-WND-2'}  (id=toolu_014N7yJ6hTNVrkcAuLfS3MBN)
-18:34:14  MODEL OUTPUT  structured   [coordinator] {'sections': [{'subtopic': 'solar power', ... 'sources': ['HX-SOL-7', 'Helios Review 2026']},
-                                     {'subtopic': 'wind power', ...}]}  (id=toolu_015B6d4Sah5e8FgjzfCF8yzr)
-18:34:14  MODEL OUTPUT  stop_reason  [coordinator] tool_use  (loop result: success)
-18:34:15  MODEL INPUT   prompt       [coordinator] Topic: renewable energy technologies. Must cover at least: ['solar', 'wind', 'geothermal',
-                                     'tidal', 'biomass', 'fusion']. Report sections so far: [ ...2 sections... ]. List every category ...
-18:34:20  MODEL OUTPUT  structured   [coordinator] {'coverage': [{'subtopic': 'solar', 'status': 'well_covered', ...}, {'subtopic': 'wind',
-                                     'status': 'well_covered', ...}, {'subtopic': 'geothermal', 'status': 'missing', 'reason': 'No section yet.'},
-                                     ... tidal, biomass, fusion, hydropower, green hydrogen: missing ...]}  (id=toolu_01Xuzq6RPumTjpDdZRuEmt2Z)
-18:34:20  MODEL OUTPUT  stop_reason  [coordinator] tool_use  (loop result: success)
-18:34:21  iteration 1: delegated 2 -> coverage 25% -> gaps ['geothermal', 'tidal', 'biomass', 'fusion', 'hydropower', 'green hydrogen']
+── round 1 ───────────────────────────────────────────────────────────────────────────────
 
-── round 2 ─────────────────────────────────────────────────────────────────────────────────────────
-18:34:21  MODEL INPUT   prompt       [coordinator] Research goal: ... Subtopics for this round (...): ["geothermal", "tidal", "biomass",
-                                     "fusion", "hydropower", "green hydrogen"]
-                                     Fix only these gaps:
-                                     - geothermal: No section yet.
-                                     - tidal: No section yet. Tidal and wave/marine energy needs research.
-                                     - biomass: No section yet.
-                                     - fusion: No section yet. It is an experimental category.
-                                     - hydropower: Major mainstream renewable category with no section yet.
-                                     - green hydrogen: Emerging category with no section yet. ...
-                                     Delegate with one Agent call ...
-18:34:25  MODEL OUTPUT  tool_use     [coordinator] Agent {... 'subagent_type': 'web-searcher', 'prompt': '... "geothermal", "tidal" (include
-                                     wave/marine energy), "biomass", "fusion", "hydropower", "green hydrogen". ...'}  (id=toolu_01VxKb1ScB2gaWPxvT9ZveAC)
-18:34:27  ... 6 × web_search [web-searcher]: geothermal → HX-GEO-3, 'tidal wave marine energy' → HX-TID-4, biomass → HX-BIO-6,
-              fusion → HX-FUS-1, hydropower → HX-HYD-5, 'green hydrogen' → "No Helios results for 'green hydrogen'." ...
-18:34:34  MODEL OUTPUT  tool_use     [coordinator] Agent {... 'subagent_type': 'doc-analyst', 'prompt': '... HX-GEO-3 (subtopic "geothermal"
-                                     ...), HX-TID-4 (...), HX-BIO-6 (...), HX-FUS-1 (...), HX-HYD-5 (...). Green hydrogen had no document found;
-                                     do not read anything for it. ...'}  (id=toolu_01PWe3BMFx1ztKhhFUmzfXm9)
-18:34:36  ... 5 × read_document [doc-analyst]: HX-GEO-3, HX-TID-4, HX-BIO-6, HX-FUS-1, HX-HYD-5, all is_error=None ...
-18:34:47  MODEL OUTPUT  structured   [coordinator] {'sections': [ ...6 sections; 'green hydrogen' with 'sources': []... ]}
-18:34:48  MODEL INPUT   prompt       [coordinator] Topic: ... Report sections so far: [ ...8 sections... ] ...
-18:34:54  MODEL OUTPUT  thinking     [coordinator] I'm applying the coverage definition structurally: solar, wind, geothermal, tidal, biomass,
-                                     fusion, and hydropower all have web findings, document findings, and a source id, so they count as
-                                     well_covered ... Green hydrogen stands out as a section with no actual findings or sources ...
-18:34:56  MODEL OUTPUT  structured   [coordinator] {'coverage': [ ...7 × well_covered..., {'subtopic': 'green hydrogen', 'status': 'missing',
-                                     'reason': 'The section is empty: ... It needs a different search approach or source.'}]}
+18:33:53  MODEL INPUT   prompt       [coordinator]
+          Research goal: a sourced overview of "renewable energy technologies" with key
+            figures from Helios Institute sources.
+          Subtopics for this round (delegate only these, using these exact names): ["solar
+            power", "wind power"]
+          Delegate with one Agent call that finds sources for all of these subtopics, then
+            one Agent call that reads the documents those sources name. Return one section
+            per subtopic.
+
+18:33:57  MODEL OUTPUT  tool_use     [coordinator]
+          Agent {'description': 'Find sources', 'subagent_type': 'web-searcher',
+                 'prompt': 'Research goal: a sourced overview of "renewable energy
+                     technologies" with key figures from Helios Institute sources. Find
+                     Helios Institute sources for exactly these subtopics: "solar power"
+                     and "wind power". For each subtopic, report the key figure shown in
+                     search results and the exact document id that holds the full analysis
+                     (e.g. HX-SOL-7). Report per subtopic.'}
+          (id=toolu_01YH3adjwNbSjQYi4MTTj12i)
+
+18:33:58  ... 2 × web_search [web-searcher] and their tool_results, all is_error=None:
+              'solar power' → HX-SOL-7
+              'wind power'  → HX-WND-2
+
+18:34:00  MODEL INPUT   tool_result  [coordinator]
+          [{'type': 'text',
+            'text': '[Subagent hand-back] ... The report follows:\n
+                  **Solar power**\n
+                  - Key figure: solar capacity grew 31% in 2025 (Helios Review 2026).\n
+                  - Document id: HX-SOL-7\n
+                  \n
+                  **Wind power**\n
+                  - Key figure: offshore wind added 19.6 GW in 2025 (Helios Review 2026).
+                    This figure covers offshore wind only, not total wind capacity.\n
+                  - Document id: HX-WND-2\n
+                  \n
+                  Each search returned one result, and I used only what those results
+                    said.\n
+                agentId: a30997290a9e1b26a\n
+                <usage>subagent_tokens: 1896\n
+                tool_uses: 2\n
+                duration_ms: 3272</usage>'}]
+          (tool_use_id=toolu_01YH3adjwNbSjQYi4MTTj12i, is_error=None)
+
+18:34:03  MODEL OUTPUT  tool_use     [coordinator]
+          Agent {'description': 'Read documents', 'subagent_type': 'doc-analyst',
+                 'prompt': 'Research goal: a sourced overview of "renewable energy
+                     technologies" with key figures from Helios Institute sources. Read
+                     these two Helios documents by exact id and extract key figures for
+                     each subtopic: "solar power" -> HX-SOL-7 (search snippet: solar
+                     capacity grew 31% in 2025); "wind power" -> HX-WND-2 (search snippet:
+                     offshore wind added 19.6 GW in 2025, offshore only, not total wind).
+                     Report key figures per subtopic, noting whether figures are
+                     onshore/offshore/total and units/years.'}
+          (id=toolu_016V8VNqRXpPncQGUCiyE95d)
+
+18:34:05  ... 2 × read_document [doc-analyst] and their tool_results, all is_error=None:
+              'HX-SOL-7' → utility-scale cost fell to $27.40/MWh.
+              'HX-WND-2' → the average capacity factor reached 41.3%.
+
+18:34:14  MODEL OUTPUT  structured   [coordinator]
+          {'sections': [
+              {'subtopic': 'solar power',
+               'web_findings': 'Search result (Helios Review 2026): solar capacity grew
+                   31% in 2025. Full analysis is in HX-SOL-7.',
+               'document_findings': 'HX-SOL-7 gives utility-scale solar cost fell to
+                   $27.40/MWh. The document does not state the year ...',
+               'sources': ['HX-SOL-7', 'Helios Review 2026']},
+              {'subtopic': 'wind power',
+               'web_findings': 'Search result (Helios Review 2026): offshore wind added
+                   19.6 GW in 2025. This covers offshore wind ...',
+               'document_findings': 'HX-WND-2 gives an average capacity factor of 41.3%.
+                   The document does not say whether this is ...',
+               'sources': ['HX-WND-2', 'Helios Review 2026']}
+          ]}
+          (id=toolu_015B6d4Sah5e8FgjzfCF8yzr)
+18:34:14  MODEL OUTPUT  stop_reason  [coordinator] tool_use  (loop result: success)
+
+18:34:15  MODEL INPUT   prompt       [coordinator]
+          Topic: renewable energy technologies. Must cover at least: ['solar', 'wind',
+            'geothermal', 'tidal', 'biomass', 'fusion']. Report sections so far: [ ...2
+            sections: solar power, wind power... ]. List every category this topic needs
+            ... Give a one-line reason for each.
+
+18:34:20  MODEL OUTPUT  structured   [coordinator]
+          {'coverage': [
+              {'subtopic': 'solar', 'status': 'well_covered',
+               'reason': 'Section has web findings, document findings and source ids
+                   (HX-SOL-7) ...'},
+              {'subtopic': 'wind', 'status': 'well_covered',
+               'reason': 'Section has web findings, document findings and source ids
+                   (HX-WND-2) ...'},
+              {'subtopic': 'geothermal', 'status': 'missing',
+               'reason': 'No section yet.'},
+              {'subtopic': 'tidal', 'status': 'missing',
+               'reason': 'No section yet. Tidal and wave/marine energy needs research.'},
+              {'subtopic': 'biomass', 'status': 'missing', 'reason': 'No section yet.'},
+              {'subtopic': 'fusion', 'status': 'missing',
+               'reason': 'No section yet. It is an experimental category.'},
+              {'subtopic': 'hydropower', 'status': 'missing',
+               'reason': 'Major mainstream renewable category with no section yet.'},
+              {'subtopic': 'green hydrogen', 'status': 'missing',
+               'reason': 'Emerging category with no section yet. It is an energy carrier
+                   and ...'}
+          ]}
+          (id=toolu_01Xuzq6RPumTjpDdZRuEmt2Z)
+18:34:20  MODEL OUTPUT  stop_reason  [coordinator] tool_use  (loop result: success)
+
+18:34:21  iteration 1: delegated 2 -> coverage 25% -> gaps ['geothermal', 'tidal',
+            'biomass', 'fusion', 'hydropower', 'green hydrogen']
+
+── round 2 ───────────────────────────────────────────────────────────────────────────────
+
+18:34:21  MODEL INPUT   prompt       [coordinator]
+          Research goal: a sourced overview of "renewable energy technologies" with key
+            figures from Helios Institute sources.
+          Subtopics for this round (delegate only these, using these exact names):
+            ["geothermal", "tidal", "biomass", "fusion", "hydropower", "green hydrogen"]
+          Fix only these gaps:
+          - geothermal: No section yet.
+          - tidal: No section yet. Tidal and wave/marine energy needs research.
+          - biomass: No section yet.
+          - fusion: No section yet. It is an experimental category.
+          - hydropower: Major mainstream renewable category with no section yet.
+          - green hydrogen: Emerging category with no section yet. It is an energy carrier
+            and could be folded in with other emerging technologies.
+          Delegate with one Agent call that finds sources for all of these subtopics, then
+            one Agent call that reads the documents those sources name. Return one section
+            per subtopic.
+
+18:34:25  MODEL OUTPUT  tool_use     [coordinator]
+          Agent {'description': 'Find Helios sources', 'subagent_type': 'web-searcher',
+                 'prompt': 'Research goal: ... Find Helios Institute sources for each of
+                     these exact subtopics: "geothermal", "tidal" (include wave/marine
+                     energy), "biomass", "fusion", "hydropower", "green hydrogen". ...'}
+          (id=toolu_01VxKb1ScB2gaWPxvT9ZveAC)
+
+18:34:27  ... 6 × web_search [web-searcher] and their tool_results, all is_error=None:
+              'geothermal'               → HX-GEO-3
+              'tidal wave marine energy' → HX-TID-4
+              'biomass'                  → HX-BIO-6
+              'fusion'                   → HX-FUS-1
+              'hydropower'               → HX-HYD-5
+              'green hydrogen'           → "No Helios results for 'green hydrogen'."
+
+18:34:34  MODEL OUTPUT  tool_use     [coordinator]
+          Agent {'description': 'Read Helios documents', 'subagent_type': 'doc-analyst',
+                 'prompt': 'Research goal: ... HX-GEO-3 (subtopic "geothermal"; search
+                     noted output rose 8.7%), HX-TID-4 (subtopic "tidal"; search noted
+                     tidal stream capacity 1.9 GW; note whether it covers wave/marine),
+                     ... Green hydrogen had no document found; do not read anything for
+                     it. ...'}
+          (id=toolu_01PWe3BMFx1ztKhhFUmzfXm9)
+
+18:34:36  ... 5 × read_document [doc-analyst] and their tool_results, all is_error=None:
+              'HX-GEO-3' → enhanced-geothermal pilot wells reached 245 °C.
+              'HX-TID-4' → the Kestrel Strait array ran at a 37.5% capacity factor.
+              'HX-BIO-6' → waste feedstocks made up 63% of supply.
+              'HX-FUS-1' → a 140 MW grid pilot is planned for 2034.
+              'HX-HYD-5' → pumped-storage capacity rose to 212 GW.
+
+18:34:47  MODEL OUTPUT  structured   [coordinator]
+          {'sections': [
+              {'subtopic': 'geothermal',
+               'web_findings': 'Search result (HX-GEO-3): geothermal output rose 8.7%.',
+               'document_findings': 'HX-GEO-3: enhanced-geothermal pilot wells reached
+                   245 °C (no year given). The 8.7% output rise was ...',
+               'sources': ['HX-GEO-3']},
+              ... tidal, biomass, fusion, hydropower: the same shape ...
+              {'subtopic': 'green hydrogen',
+               'web_findings': 'No Helios results were found for green hydrogen.',
+               'document_findings': 'No document was found, so none was read. This
+                   subtopic is not covered. Coverage is incomplete ...',
+               'sources': []}
+          ]}
+          (id=toolu_01UukrskYx8LHcndiJNQ2xEi)
+
+18:34:48  MODEL INPUT   prompt       [coordinator]
+          Topic: renewable energy technologies. Must cover at least: ['solar', 'wind',
+            'geothermal', 'tidal', 'biomass', 'fusion']. Report sections so far: [ ...8
+            sections: solar power, wind power, geothermal, tidal, biomass, fusion,
+            hydropower, green hydrogen... ]. List every category this topic needs ... Give
+            a one-line reason for each.
+
+18:34:54  MODEL OUTPUT  thinking     [coordinator]
+          I'm applying the coverage definition structurally: solar, wind, geothermal,
+            tidal, biomass, fusion, and hydropower all have web findings, document
+            findings, and a source id, so they count as well_covered even though some like
+            tidal have gaps on related topics like wave/marine energy.
+          Green hydrogen stands out as a section with no actual findings or sources, so
+            despite having a heading it effectively counts as missing. I'll finalize the
+            coverage list with these classifications.
+
+18:34:56  MODEL OUTPUT  structured   [coordinator]
+          {'coverage': [
+              ... solar, wind, geothermal, tidal, biomass, fusion, hydropower:
+                  'well_covered' ...
+              {'subtopic': 'green hydrogen', 'status': 'missing',
+               'reason': 'The section is empty: no web findings, no document and no source
+                   ids. It needs a different search approach or source.'}
+          ]}
+          (id=toolu_01HD1r19A34RHTiMh6WqrtAS)
+
 18:34:57  iteration 2: delegated 6 -> coverage 88% -> gaps ['green hydrogen']
 
-── round 3 (traced in full in 3.2) ─────────────────────────────────────────────────────────────────
-18:35:02  ... 1 Agent call (web-searcher), 6 web_search calls, all "No Helios results"; no doc-analyst call ...
+── round 3 (traced in full in 3.2) ───────────────────────────────────────────────────────
+
+18:34:57  ... delegate(): 1 Agent call (web-searcher), 6 × web_search, all "No Helios
+              results"; no doc-analyst call. assess_coverage(): 7 × 'well_covered', green
+              hydrogen 'missing' ...
+
 18:35:22  iteration 3: delegated 1 -> coverage 88% -> gaps ['green hydrogen']
 18:35:22  Coverage 88% after 3 iteration(s); gaps: ['green hydrogen']
-18:35:22  Never delegated in round 1: ['geothermal', 'tidal', 'biomass', 'fusion'] -> root cause: the coordinator's decomposition, not the subagents
-18:35:22  Run 'narrow': dispatcher 25% -> coordinator 88% after 3 round(s), categories still missing: []
+18:35:22  Never delegated in round 1: ['geothermal', 'tidal', 'biomass', 'fusion'] -> root
+            cause: the coordinator's decomposition, not the subagents
+18:35:22  Run 'narrow': dispatcher 25% -> coordinator 88% after 3 round(s), categories
+            still missing: []
 ```
 
 **Round by round:**

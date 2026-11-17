@@ -1,0 +1,1245 @@
+# POC 2: Fan Out in Parallel, Hand Over Every Field
+
+> **File:** `poc2_pipeline.py` (with `coordinator.py`, `attribution_setup.py`, `attribution_check.py` and `common.py`)
+> **Domain:** 01 Agentic Architecture & Orchestration → 03 Subagent Invocation and Context Passing
+> **SDK:** Claude Agent SDK for Python (`claude-agent-sdk >=0.2.174,<0.3`; 0.2.181 in the folder's `.venv`)
+> **Page:** https://claude.ai/artifact/AgSLZ8tu7n8i7p8aqRu5Cb
+
+---
+
+## 1. What this POC proves
+
+POC 1 showed that the research subagents return findings with content and metadata. POC 2 follows those findings to the synthesizer, the subagent that writes the final brief. It runs the same coordinator and the same synthesizer three times; only what crosses the handoff changes. Every claim below is checked against one real run: `logs/poc2_pipeline_20261113_203305.log`.
+
+| # | Idea | Where it shows up in the code |
+|---|------|------------------------------|
+| 1 | **Stripping metadata causes unsourced claims.** The same 7 findings without `source_url`, `page_number` and the rest give a brief with no citations at all. | `strip_metadata()`; run `stripped handoff`: `metadata passed 0/35 -> 6 statement(s), 6 without citations` |
+| 2 | **Passing every field fixes it.** The same findings with all metadata give a brief where every statement cites a URL and a page. | run `full handoff`: `metadata passed 35/35 -> 7 statement(s), 0 without citations` |
+| 3 | **A missing citation is a handoff problem first.** The diagnosis checks what reached the synthesizer before it blames the synthesizer. | `diagnose()` |
+| 4 | **Every claim is verified against real sources.** A citation must name a `(source_url, page_number)` pair that exists. | `verify_attribution()` |
+| 5 | **Independent subagents go out in one response.** Two Agent calls in one coordinator response run at the same time; the round takes about as long as the slower one. | `PARALLEL_RULE`; `delegation_timing()`; `Delegation: 1 response(s), overlap=True, 9.3 s` |
+| 6 | **Synthesis waits for both reports.** The synthesizer starts only after both research reports are in. | `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`; `synthesizer started after both reports: True` |
+
+The pattern in one picture:
+
+```
+                ┌─ Agent ─▶ web-searcher ─ findings ─┐   one response,
+question ──▶ coordinator                              ├─▶ both awaited ──▶ coordinator ── Agent ──▶ synthesizer ──▶ cited brief
+                └─ Agent ─▶ doc-analyst  ─ findings ─┘                      (every finding, every field)
+```
+
+---
+
+## 2. The files involved
+
+```
+03-Subagent-Invocation-and-Context-Passing/
+├── .env / .env.example     ← ANTHROPIC_API_KEY, MODEL_ID, MAX_TURNS, MAX_BUDGET_USD
+├── requirements.txt        ← claude-agent-sdk >=0.2.174,<0.3 and python-dotenv
+├── common.py               ← Settings, load_settings(), setup_logging(), log_model_io()
+├── attribution_setup.py    ← mock sources, 3 tools, the finding format, FINDINGS, AGENTS, build_pipeline_options()
+├── coordinator.py          ← run_coordinator(): one coordinator call, its Agent calls with prompt, report and timing
+├── attribution_check.py    ← strip_metadata(), check_metadata_passed(), verify_attribution(), diagnose(), delegation_timing()
+├── poc1_gate_test.py       ← POC 1: the Agent tool as the gate (not covered here)
+├── poc2_pipeline.py        ← entry point: 3 runs, the handoff tests and the parallel pipeline
+└── logs/
+    └── poc2_pipeline_20261113_203305.log   ← the real run used in sections 3.2 and 5
+```
+
+Every snippet in this article is copied from these files, logging statements included. Each logging statement is named with the log line it writes.
+
+The responsibilities split like this:
+- `common.py` covers **configuration and observability**.
+- `attribution_setup.py` covers **capabilities** (tools and subagents), the **contract** (the finding format and the 7 reference `FINDINGS`) and the **guardrails** (`build_pipeline_options()`).
+- `coordinator.py` covers **orchestration**: stream one coordinator call and record each Agent call's prompt, report, `message_id` and timing.
+- `attribution_check.py` covers **verification**: what crossed the handoff, whether each claim is attributed, the diagnosis, and the timing.
+- `poc2_pipeline.py` covers **the experiment**: two controlled handoffs, then the full parallel pipeline.
+
+---
+
+## 3. End-to-end execution flow
+
+### 3.1 The big picture
+
+```
+python poc2_pipeline.py
+        │
+        ▼
+asyncio.run(main())                                                     [poc2_pipeline.py]
+        │
+        ├─▶ load_settings(), setup_logging("poc2_pipeline")             [common.py]
+        │
+        └─▶ for name, prompt in RUNS:
+               │     "stripped handoff":  HANDOFF_TEST with strip_metadata(FINDINGS)
+               │     "full handoff":      HANDOFF_TEST with FINDINGS
+               │     "parallel pipeline": "Write a sourced brief answering: <QUESTION>"
+               │
+               ├─▶ result = run_coordinator(prompt, build_pipeline_options(settings, parallel=True))   → one query()
+               │
+               ├─▶ researchers = Agent calls to web-searcher / doc-analyst      (pipeline only)
+               ├─▶ synthesizer = the Agent call to synthesizer with a report    (else: log "no synthesizer report")
+               │
+               ├─▶ expected    = the researchers' findings, or FINDINGS          [parse_findings()]
+               ├─▶ passed, total = check_metadata_passed(synthesizer["prompt"], expected)   [attribution_check.py]
+               ├─▶ attribution = verify_attribution(<synthesizer's statements>, FINDINGS)    [attribution_check.py]
+               ├─▶ log.info("Run '%s': metadata passed %d/%d -> ...")
+               ├─▶ log.info("Run '%s': %s", diagnose(passed, total, attribution))
+               └─▶ if researchers:
+                      timing = delegation_timing(result["agent_calls"]); waited = synthesizer started after both
+                      log.info("Delegation: ... synthesizer started after both reports: %s")
+```
+
+Inside `run_coordinator()`, for the parallel pipeline. The right-hand column names the log line each step writes.
+
+```
+run_coordinator(prompt, options)                                                        [coordinator.py]
+   │
+   ├─ log.info("MODEL INPUT   prompt ...")                                            → log: prompt
+   └─▶ async for message in query(prompt=prompt, options=options):
+          │
+          │   ┌──────────────────── SDK-owned: one coordinator call ─────────────────────────┐
+          │   │ coordinator response 1 (one message_id):                                     │
+          │   │   ├─ tool_use Agent {web-searcher, brief}   (id = A)                         │  → log: tool_use [coordinator]
+          │   │   └─ tool_use Agent {doc-analyst,  brief}   (id = B)                         │  → log: tool_use [coordinator]
+          │   │        ┌─ web-searcher: web_search ─┐   ┌─ doc-analyst: list + read × 2 ─┐  │  → log: [web-searcher] / [doc-analyst]
+          │   │        └── report = tool_result A ──┘   └── report = tool_result B ──────┘  │  → log: tool_result [coordinator] × 2
+          │   │ coordinator response 2 (after BOTH reports):                                 │
+          │   │   └─ tool_use Agent {synthesizer, prompt = every finding}  (id = C)          │  → log: tool_use [coordinator]
+          │   │        ┌─ synthesizer: no tools ─┐                                           │
+          │   │        └─ report = tool_result C ┘  {"statements": [...]}                    │  → log: tool_result [coordinator]
+          │   │ coordinator response 3: final text (the brief), stop_reason = end_turn       │  → log: text, stop_reason
+          │   └──────────────────────────────────────────────────────────────────────────────┘
+          │
+          ├─ log_model_io(message, agent_names)
+          ├─ each Agent call → agent_calls[id] = {..., "prompt", "message_id", "started"}
+          └─ each report     → agent_calls[id]["report"], ["finished"]
+```
+
+In the two handoff runs the box holds a single spawn: one Agent call to the synthesizer with the fixed text, its report, and the coordinator's reply.
+
+### 3.2 Messages your `async for` receives (the parallel pipeline, real output)
+
+The values below come from the real run on 2026-11-13, recorded in `logs/poc2_pipeline_20261113_203305.log`. Each log line comes from one statement in the code:
+
+| Log line tag | Message class yielded by `query()` | Field logged | Written by |
+|--------------|------------------------------------|--------------|------------|
+| `MODEL INPUT   prompt` | *(none: the `prompt` passed to `run_coordinator()`)* | `prompt` | `log.info("MODEL INPUT   prompt ...")` in `run_coordinator()` (`coordinator.py`) |
+| `MODEL OUTPUT  text` | `AssistantMessage` → `TextBlock` | `block.text` | `log_model_io()` (`common.py`) |
+| `MODEL OUTPUT  tool_use` | `AssistantMessage` → `ToolUseBlock` | `block.name`, `block.input`, `block.id` | `log_model_io()` |
+| `MODEL INPUT   tool_result` | `UserMessage` → `ToolResultBlock` | `block.content`, `block.tool_use_id`, `block.is_error` | `log_model_io()` |
+| `MODEL OUTPUT  stop_reason` | `ResultMessage` | `message.stop_reason`, `message.subtype` | `log_model_io()` |
+| `MODEL OUTPUT  thinking` | `AssistantMessage` → `ThinkingBlock` | `block.thinking`, only when non-empty | `log_model_io()`. None in this log |
+| `[coordinator]`, `[web-searcher]`, `[doc-analyst]` | the message the line came from | `message.parent_tool_use_id` → the `subagent_type` of the Agent call with that id | `who = ...` in `log_model_io()` |
+| `Run '...': metadata passed N/M -> ...` | *(none: Python checks)* | `check_metadata_passed()`, `verify_attribution()` | `log.info(...)` in `main()` (`poc2_pipeline.py`) |
+| `Run '...': <diagnosis>` | *(none)* | `diagnose(passed, total, attribution)` | `log.info(...)` in `main()` |
+| `Delegation: ... synthesizer started after both reports: ...` | *(none: Python timing)* | `delegation_timing()` and `waited` | `log.info(...)` in `main()` |
+| `Run '...': no synthesizer report`, `Run '...': <error>`, `SDK error: ...` | *(none)* | the failure | `main()`. None in this log |
+
+The parallel pipeline as it really streamed:
+
+```
+20:33:35  (input)                            [coordinator]                     log: prompt
+            prompt = Write a sourced brief answering: What is known about the Tessaly sodium-ion grid
+                       battery pilot at Kestrel Ridge?
+
+20:33:39  AssistantMessage › ToolUseBlock    [coordinator]                     log: tool_use
+            name  = "Agent"
+            input = {'description': 'Web research on Tessaly pilot', 'subagent_type': 'web-searcher',
+                     'prompt': 'Research question: What is known about ...? Search the web and return
+                                findings, each with source URL, title, and the relevant claim/snippet.'}
+            id    = "toolu_01FqtBYWh7Zd1cFJMpC1szm4"                          ← call A
+20:33:40  AssistantMessage › ToolUseBlock    [coordinator]                     log: tool_use
+            name  = "Agent"
+            input = {'description': 'Library research on Tessaly pilot', 'subagent_type': 'doc-analyst',
+                     'prompt': 'Research question: What is known about ...? Read the local document
+                                library (list documents, then read relevant ones) and return findings
+                                with document names, titles, URLs and page references, plus the relevant
+                                claims.'}
+            id    = "toolu_01PybjY5jfkEobQ2KydUKwVU"                          ← call B: same response as A
+
+20:33:41  ... web_search [web-searcher] and its result; 20:33:42 to 20:33:44: list_documents and
+              read_document × 2 [doc-analyst] and their results, all is_error=None ...
+
+20:33:45  UserMessage › ToolResultBlock      [coordinator]                     log: tool_result
+            content     = [{'type': 'text', 'text': '  <tools-used-before-summary>mcp__sources__web_search
+                            </tools-used-before-summary>\n ... The report follows:\n  {"findings": [ ...3
+                            findings... ]}\nagentId: a2bc1ff0796677840\n<usage>subagent_tokens: 2575\n
+                            tool_uses: 1\nduration_ms: 6168</usage>'}]
+            tool_use_id = "toolu_01FqtBYWh7Zd1cFJMpC1szm4"                    ← call A's report
+20:33:48  UserMessage › ToolResultBlock      [coordinator]                     log: tool_result
+            content     = [{'type': 'text', 'text': '  <tools-used-before-summary>mcp__sources__list_documents,
+                            mcp__sources__read_document</tools-used-before-summary>\n ... {"findings": [ ...4
+                            findings... ]}\nagentId: aa4f924871fbec0fd\n<usage>subagent_tokens: 3031\n
+                            tool_uses: 3\nduration_ms: 8185</usage>'}]
+            tool_use_id = "toolu_01PybjY5jfkEobQ2KydUKwVU"                    ← call B's report
+
+20:33:55  AssistantMessage › ToolUseBlock    [coordinator]                     log: tool_use
+            name  = "Agent"
+            input = {'description': 'Write final sourced brief', 'subagent_type': 'synthesizer',
+                     'prompt': '{"findings": [ ...all 7 findings, every field, copied from the two
+                                reports... ]}'}                              ← the whole prompt is the JSON
+            id    = "toolu_013jdpGTCYVrrLXe75d5y6re"                          ← call C, after both reports
+
+20:34:00  UserMessage › ToolResultBlock      [coordinator]                     log: tool_result
+            content     = [{'type': 'text', 'text': '[Subagent hand-back] ... The report follows:\n
+                            {"statements": [ ...7 statements, each with citations... ]}\nagentId:
+                            a4a91d2c21822885a\n<usage>subagent_tokens: 3004\ntool_uses: 0\n
+                            duration_ms: 5116</usage>'}]
+            tool_use_id = "toolu_013jdpGTCYVrrLXe75d5y6re"
+
+20:34:04  AssistantMessage › TextBlock       [coordinator]                     log: text
+            text = **Brief: Tessaly sodium-ion grid battery pilot at Kestrel Ridge** ... (a Markdown brief
+                   with a URL and page after every point)
+20:34:04  ResultMessage                      [coordinator]                     log: stop_reason
+            stop_reason = "end_turn", subtype = "success"
+```
+
+What to notice in the real data:
+- **Two spawns before any report.** Calls A (20:33:39) and B (20:33:40) are both logged before the first research result. `run_coordinator()` recorded the same `message_id` for both, so `delegation_timing()` counted `1 response(s)`. They were logged a second apart, so they reached the stream as two messages that share one `message_id`.
+- **The spokes ran at the same time.** The doc-analyst's calls (20:33:42 to 20:33:44) ran before the web-searcher's report arrived (20:33:45), and the two reports arrived 3 s apart.
+- **The synthesizer waited.** Call C (20:33:55) came after both reports (20:33:45, 20:33:48). `synthesizer started after both reports: True`.
+- **Every field crossed the handoff.** Call C's prompt holds the 7 findings with all 5 metadata fields each, exactly as the two reports returned them, `retrieved_by` values included. `check_metadata_passed()` counted 35 of 35.
+- **The prompt was only the JSON.** The coordinator didn't restate the question or the task in call C. The synthesizer still wrote a brief, because its own system prompt says what to do with findings.
+- **`tool_uses: 0`.** The synthesizer has `tools=[]`; it worked only from its brief.
+- **Not shown:** the `SystemMessage`, costs and turn counts are in the stream but not in the log. This log has no `thinking` lines.
+
+> The `UserMessage` items are **not** typed by a human. They carry tool results: source results inside a subagent, and each subagent's report for the coordinator.
+
+---
+
+## 4. Code walkthrough
+
+The snippets follow the order in which the code runs: the script first, then the module functions it calls. Where a snippet writes log lines, they're shown under it, copied from the real log (long values trimmed with `...`).
+
+### 4.1 Module docstring: three runs, one variable
+
+```python
+"""
+POC 2 - Parallel fan-out, metadata-preserving fan-in
+=====================================================
+Three runs of the same coordinator (with PARALLEL_RULE) and the same synthesizer:
+
+    stripped handoff:  the synthesizer gets the 7 findings with content only  -> claims without sources
+    full handoff:      the same 7 findings with all their metadata             -> every claim cites URL + page
+    parallel pipeline: web-searcher and doc-analyst spawned in ONE response, both reports awaited, then the
+                       synthesizer gets every finding unchanged
+
+Only what the coordinator hands the synthesizer changes. Besides model I/O, the log shows per run the metadata
+that reached the synthesizer, the claims without a valid citation and the diagnosis, and for the pipeline the
+timing (compare it with POC 1's sequential round).
+
+Run:  python poc2_pipeline.py     (3 runs)
+"""
+```
+
+**Why it matters:** the docstring states the experiment's single variable: what crosses the handoff to the synthesizer. The first two runs isolate the attribution failure; the third shows the full pattern the exam expects, fan-out in parallel and fan-in with every field.
+
+---
+
+### 4.2 Imports
+
+```python
+import asyncio
+import json
+import sys
+
+from claude_agent_sdk import ClaudeSDKError
+
+from attribution_check import check_metadata_passed, delegation_timing, diagnose, strip_metadata, verify_attribution
+from attribution_setup import FINDINGS, QUESTION, build_pipeline_options, parse_findings, parse_json_object
+from common import load_settings, log, setup_logging
+from coordinator import run_coordinator
+```
+
+| Import | What it brings in | Why this file needs it |
+| --- | --- | --- |
+| `json` | `json.dumps()` | Builds the findings payload inside the handoff prompts |
+| `ClaudeSDKError` | The SDK's base error | Stops the script on an SDK runtime failure |
+| `strip_metadata` | From `attribution_check` | The failure pattern: findings with content only |
+| `check_metadata_passed` | From `attribution_check` | Counts the metadata values that reached the synthesizer |
+| `verify_attribution` | From `attribution_check` | Checks each statement's citations against real sources |
+| `diagnose` | From `attribution_check` | Names the root cause when a claim lacks a source |
+| `delegation_timing` | From `attribution_check` | Responses, overlap and seconds of the research round |
+| `FINDINGS` | From `attribution_setup` | The 7 correct findings: the fixed input of the handoff runs |
+| `QUESTION` | From `attribution_setup` | The research question |
+| `build_pipeline_options` | From `attribution_setup` | The options, here with `parallel=True` |
+| `parse_findings`, `parse_json_object` | From `attribution_setup` | Pull the JSON out of report and prompt text |
+| `load_settings`, `log`, `setup_logging`, `run_coordinator` | From `common` and `coordinator` | Settings, the logger, one coordinator call |
+
+---
+
+### 4.3 The controlled handoff and the run table
+
+```python
+# A controlled handoff: the coordinator must pass exactly the text in <<< >>>, so we decide what crosses it.
+HANDOFF_TEST = (
+    "Controlled handoff test. Call the synthesizer subagent once and pass it exactly the text between <<< and >>>, "
+    "adding nothing: <<<Write a sourced brief answering the question below from these findings. "
+    "Question: {question} Findings: {payload}>>> Then reply with its report unchanged."
+)
+
+RUNS = [
+    ("stripped handoff", HANDOFF_TEST.format(question=QUESTION, payload=json.dumps({"findings": strip_metadata(FINDINGS)}))),
+    ("full handoff", HANDOFF_TEST.format(question=QUESTION, payload=json.dumps({"findings": FINDINGS}))),
+    ("parallel pipeline", f"Write a sourced brief answering: {QUESTION}"),  # the coordinator does it all itself
+]
+```
+
+**Why it matters:**
+- **`HANDOFF_TEST` takes the coordinator's judgment out of the first two runs.** The `<<< >>>` markers fence the exact brief, and "adding nothing" makes the coordinator a courier. So the only thing that differs between `stripped handoff` and `full handoff` is the payload Python built.
+- **Both handoff payloads hold the same 7 claims.** `strip_metadata(FINDINGS)` keeps `claim` and `analysis`; `FINDINGS` keeps all 7 keys. Same synthesizer, same question.
+- **The third prompt gives no instructions about how.** "Write a sourced brief answering: ..." leaves fan-out, waiting and the handoff to the coordinator and its system prompt.
+
+**Agentic concept:** a controlled experiment on context passing: one variable (the metadata in the handoff), everything else fixed.
+
+The first prompt as logged, with the stripped payload (abridged):
+
+```
+20:33:05  MODEL INPUT   prompt       [coordinator] Controlled handoff test. Call the synthesizer subagent once and pass it exactly the text between <<< and >>>, adding nothing: <<<Write a sourced brief answering the question below from these findings. Question: What is known about the Tessaly sodium-ion grid battery pilot at Kestrel Ridge? Findings: {"findings": [{"claim": "The Tessaly pilot delivered 48 MWh of storage at peak demand in 2025.", "analysis": "A published figure on the Tessaly pilot."}, ...]}>>> Then reply with its report unchanged.
+```
+
+---
+
+### 4.4 `main()`: one coordinator call per run, then the checks
+
+#### a) Setup
+
+```python
+async def main() -> int:
+    try:
+        settings = load_settings()
+        setup_logging("poc2_pipeline")
+    except (OSError, RuntimeError) as exc:
+        print(f"Setup failed: {exc}")
+        return 1
+```
+
+**Why it matters:** as in POC 1, settings come before logging, so a setup error is printed and leaves no log file. The log file's name, `poc2_pipeline_20261113_203305.log`, matches the second of the first prompt line.
+
+#### b) The call, and finding the synthesizer
+
+```python
+    for name, prompt in RUNS:
+        try:
+            result = await run_coordinator(prompt, build_pipeline_options(settings, parallel=True))
+        except ClaudeSDKError as exc:  # Claude Code not found, its process crashed, ...
+            log.error("SDK error: %s", exc)
+            return 1
+        researchers = [c for c in result["agent_calls"] if c["subagent_type"] in ("web-searcher", "doc-analyst")]
+        synthesizer = next((c for c in result["agent_calls"] if c["subagent_type"] == "synthesizer" and c["report"]), None)
+        if synthesizer is None:
+            log.error("Run '%s': no synthesizer report", name)
+            continue
+```
+
+**Why it matters:**
+- **`parallel=True` for every run.** All three use the same coordinator system prompt, with `PARALLEL_RULE`. In the handoff runs it doesn't matter, because `HANDOFF_TEST` asks for one call.
+- **The Agent calls are the evidence.** `researchers` holds the research spawns (empty in the handoff runs). `synthesizer` is the synthesizer spawn that brought back a report; its `prompt` is exactly what crossed the handoff.
+- **No synthesizer report, no checks.** The run is logged as an error and skipped, and the next run still goes. In the real run all three had one.
+
+#### c) What crossed, and what came out
+
+```python
+        try:
+            # What should have crossed the handoff: the researchers' findings (pipeline), else the fixed 7.
+            expected = [f for call in researchers for f in parse_findings(call["report"] or "")] or FINDINGS
+            passed, total = check_metadata_passed(synthesizer["prompt"], expected)
+            attribution = verify_attribution(parse_json_object(synthesizer["report"])["statements"], FINDINGS)
+        except (ValueError, KeyError) as exc:  # a report or prompt without the expected JSON
+            log.error("Run '%s': %s", name, exc)
+            continue
+```
+
+**Why it matters:**
+- **`expected` depends on the run.** In the pipeline it's the findings the two research reports actually returned, so the check asks "did the coordinator pass on what it received, unchanged?". In the handoff runs there are no researchers, so `expected` falls back to `FINDINGS`.
+- **`check_metadata_passed()` reads the synthesizer's prompt, not the coordinator's.** It parses the JSON in the Agent call's `prompt` and compares field by field.
+- **`verify_attribution()` checks the synthesizer's output against `FINDINGS`,** the set of real `(source_url, page_number)` pairs.
+- A missing JSON object or `statements` key is logged per run, not fatal.
+
+#### d) The two result lines
+
+```python
+        log.info("Run '%s': metadata passed %d/%d -> %d statement(s), %d without citations, %d invalid citation(s), "
+                 "%d of 7 sources cited", name, passed, total, attribution["statements"], len(attribution["orphaned"]),
+                 len(attribution["invalid"]), len(attribution["cited"]))
+        log.info("Run '%s': %s", name, diagnose(passed, total, attribution))
+```
+
+**Why it matters:** one line puts the cause (`metadata passed`) next to the effect (`without citations`, `invalid citation(s)`, sources cited). The next line turns them into a diagnosis.
+
+The lines they wrote:
+
+```
+20:33:19  Run 'stripped handoff': metadata passed 0/35 -> 6 statement(s), 6 without citations, 0 invalid citation(s), 0 of 7 sources cited
+20:33:19  Run 'stripped handoff': Root cause: metadata was not passed to the synthesizer. Fix the coordinator's handoff, not the synthesizer prompt.
+20:33:35  Run 'full handoff': metadata passed 35/35 -> 7 statement(s), 0 without citations, 0 invalid citation(s), 7 of 7 sources cited
+20:33:35  Run 'full handoff': All claims attributed.
+20:34:05  Run 'parallel pipeline': metadata passed 35/35 -> 7 statement(s), 0 without citations, 0 invalid citation(s), 7 of 7 sources cited
+20:34:05  Run 'parallel pipeline': All claims attributed.
+```
+
+#### e) The pipeline's timing line
+
+```python
+        if researchers:  # the pipeline: one response spawned both, and the synthesizer waited for both (C15-C17)
+            timing = delegation_timing(result["agent_calls"])
+            waited = synthesizer["started"] > max(call["finished"] or 0.0 for call in researchers)
+            log.info("Delegation: %d response(s), overlap=%s, %.1f s in all (%s); synthesizer started after both "
+                     "reports: %s", timing["responses"], timing["overlap"], timing["delegation_seconds"],
+                     ", ".join(f"{agent} {seconds:.1f} s" for agent, seconds in timing["durations"].items()), waited)
+    return 0
+```
+
+**Why it matters:**
+- **Only the pipeline has researchers,** so only it gets a timing line.
+- **`waited`** compares the synthesizer's spawn time with the later of the two research reports. `True` means synthesis didn't start on a partial set of findings.
+- **Compare with POC 1.** POC 1's sequential round logged `2 response(s), overlap=False, 15.9 s in all (web-searcher 6.2 s, doc-analyst 8.0 s)`.
+
+The line it wrote:
+
+```
+20:34:05  Delegation: 1 response(s), overlap=True, 9.3 s in all (web-searcher 6.2 s, doc-analyst 8.2 s); synthesizer started after both reports: True
+```
+
+`9.3 s` against POC 1's `15.9 s`, for subagents that took about as long in both runs. The round now costs about the slower subagent (8.2 s) plus the second between the two spawns, not the sum of both.
+
+**Log lines:** no `SDK error:`, `no synthesizer report` or parse error line in this run, so `main()` returned `0`.
+
+---
+
+### 4.5 `__main__`
+
+```python
+if __name__ == "__main__":
+    sys.exit(asyncio.run(main()))
+```
+
+`asyncio.run` starts the event loop; `sys.exit` passes `0` or `1` to the shell.
+
+---
+
+### 4.6 `strip_metadata()`: the exam's failure pattern (from `attribution_check.py`)
+
+```python
+def strip_metadata(findings: list[dict]) -> list[dict]:
+    """The exam's failure pattern (C12): pass only the content, drop where it came from."""
+    return [{key: finding[key] for key in CONTENT_FIELDS} for finding in findings]
+```
+
+**Why it matters:** this one line is the bug the exam asks you to diagnose. A coordinator that "summarizes" findings into just the claims keeps the facts and loses every source. The claims are still correct; nothing downstream can prove it.
+
+**Agentic concept:** context passing between agents is lossy unless the structure is passed whole.
+
+---
+
+### 4.7 `check_metadata_passed()`: what reached the synthesizer (from `attribution_check.py`)
+
+```python
+def check_metadata_passed(agent_prompt: str, findings: list[dict]) -> tuple[int, int]:
+    """How many metadata values of the findings reached the agent unchanged: (passed, total)."""
+    sent = {item.get("claim"): item for item in parse_json_object(agent_prompt).get("findings", [])}
+    passed = sum(
+        1 for finding in findings for key in METADATA_FIELDS
+        if key in sent.get(finding["claim"], {}) and sent[finding["claim"]][key] == finding[key]
+    )
+    return passed, len(findings) * len(METADATA_FIELDS)
+```
+
+**Why it matters:**
+- It checks the **handoff itself**: the JSON inside the synthesizer's Agent prompt, matched to the expected findings by `claim`.
+- A value counts only if the key is there **and** the value is unchanged. A shortened URL or a changed page number would not count.
+- `total` is `7 × 5 = 35`: seven findings, five metadata fields each.
+
+| Run | `expected` | What the synthesizer's prompt held | `passed` / `total` |
+|-----|-----------|------------------------------------|--------------------|
+| `stripped handoff` | `FINDINGS` | 7 findings, `claim` and `analysis` only | `0/35` |
+| `full handoff` | `FINDINGS` | 7 findings, all keys | `35/35` |
+| `parallel pipeline` | the 7 findings the research reports returned | the same 7, copied unchanged by the coordinator | `35/35` |
+
+---
+
+### 4.8 `verify_attribution()`: every claim needs a real source (from `attribution_check.py`)
+
+```python
+def verify_attribution(statements: list[dict], findings: list[dict]) -> dict[str, Any]:
+    """Every claim must cite a real (source_url, page_number) pair from the findings (C13)."""
+    real = {(finding["source_url"], finding["page_number"]) for finding in findings}
+    orphaned = [s for s in statements if not s.get("citations")]  # a claim without any source
+    cited = [(c.get("source_url"), c.get("page_number")) for s in statements for c in s.get("citations", [])]
+    return {"statements": len(statements), "orphaned": orphaned,
+            "invalid": [pair for pair in cited if pair not in real],  # an invented or garbled source
+            "cited": {pair for pair in cited if pair in real}}
+```
+
+| Key | Meaning | stripped | full | pipeline |
+|-----|---------|----------|------|----------|
+| `statements` | statements in the brief | 6 | 7 | 7 |
+| `orphaned` | statements with no citation | 6 | 0 | 0 |
+| `invalid` | citations that match no real `(url, page)` pair | 0 | 0 | 0 |
+| `cited` | distinct real pairs cited | 0 | 7 | 7 |
+
+**Why it matters:**
+- **Two failure types.** `orphaned` is a claim with no source (the stripped handoff). `invalid` is a claim with a made-up or garbled source, which a presence check alone would miss.
+- **`cited` is a set,** so a source cited twice counts once. In the pipeline, the expansion statement cited two sources (the newsroom page 1 and the year-one report page 3); the 7 distinct pairs were still all 7 sources.
+
+---
+
+### 4.9 `diagnose()`: check the handoff first (from `attribution_check.py`)
+
+```python
+def diagnose(passed: int, total: int, attribution: dict[str, Any]) -> str:
+    """A claim without a source? Check the handoff first, not the synthesizer (C14)."""
+    if not (attribution["orphaned"] or attribution["invalid"]):
+        return "All claims attributed."
+    if passed < total:
+        return "Root cause: metadata was not passed to the synthesizer. Fix the coordinator's handoff, not the synthesizer prompt."
+    return "Metadata reached the synthesizer: now review its prompt."
+```
+
+**Why it matters:** the order of the `if`s is the exam's diagnostic order. First: is anything wrong? Then: did the metadata reach the synthesizer? Only if it did is the synthesizer's prompt the suspect. In the stripped run, `passed` was `0` of `35`, so the diagnosis pointed at the coordinator's handoff.
+
+**Agentic concept:** debug multi-agent output by tracing the data across each handoff before changing any agent.
+
+---
+
+### 4.10 `FINDINGS`: the fixed input of the handoff runs (from `attribution_setup.py`)
+
+```python
+# The 7 correct findings, as the two research subagents should return them: POC 2's fixed handoff input.
+FINDINGS = [
+    {"claim": r["snippet"], "analysis": "A published figure on the Tessaly pilot.", "source_url": r["url"],
+     "document_name": r["title"], "page_number": r["page"], "confidence": "high", "retrieved_by": "web-searcher"}
+    for r in WEB_RESULTS
+] + [
+    {"claim": text, "analysis": "A figure from the local library.", "source_url": d["url"], "document_name": d["title"],
+     "page_number": page, "confidence": "high", "retrieved_by": "doc-analyst"}
+    for d in DOCUMENTS.values() for page, text in d["pages"].items()
+    if any(char.isdigit() for char in text)  # one finding per page that states a figure: not the audit's cover page
+]
+```
+
+**Why it matters:**
+- The handoff runs need findings known to be correct, so a missing citation can only come from the handoff. `FINDINGS` is built from the same mock data the tools serve: 3 web results + 4 document pages with a figure.
+- It also defines the 7 real `(source_url, page_number)` pairs that `verify_attribution()` accepts, in every run.
+
+---
+
+### 4.11 `PARALLEL_RULE` and the handoff rule (from `attribution_setup.py`)
+
+```python
+PARALLEL_RULE = ("web-searcher and doc-analyst are independent: call both in one response, with two Agent tool "
+                 "calls, and wait for both reports before you go on.")
+
+
+def coordinator_prompt(parallel: bool) -> str:
+    return ("You are the coordinator of a research team. Never research yourself: delegate. web-searcher finds web "
+            "sources; doc-analyst reads the local document library. "
+            + (PARALLEL_RULE if parallel else SEQUENTIAL_RULE)
+            + " Subagents start with no context, so give each research subagent the full research question. "
+            "Call synthesizer only when your task asks for a brief: call it last, and pass it one JSON object "
+            '{"findings": [...]} holding every finding from both reports, unchanged. Never drop, shorten or '
+            "summarize any field.")
+```
+
+| Rule in the prompt | What the real pipeline did |
+|--------------------|----------------------------|
+| `PARALLEL_RULE`: "call both in one response, with two Agent tool calls" | Calls A and B logged at 20:33:39 and 20:33:40, both before any result; `1 response(s)` |
+| "wait for both reports before you go on" | Call C at 20:33:55, after the reports at 20:33:45 and 20:33:48 |
+| "give each research subagent the full research question" | Both briefs open with `Research question: What is known about ...` |
+| "Call synthesizer ... last, and pass it one JSON object `{"findings": [...]}` holding every finding ... unchanged" | Call C's whole prompt is that JSON object, all 7 findings, every field |
+| "Never drop, shorten or summarize any field." | `metadata passed 35/35` |
+
+**Why it matters:**
+- **Parallelism is a prompt rule here,** and the SDK runs the calls: when one response holds two Agent calls, both subagents run at once. `build_pipeline_options(parallel=True)` is the only switch.
+- **The handoff rule is explicit about format and completeness.** "unchanged" and "Never drop, shorten or summarize" name the exact failure of the stripped run.
+- **The rule didn't ask the coordinator to restate the question,** and it didn't. The synthesizer got only the JSON, and its system prompt was enough here. A brief that also stated the question would follow the "full context" advice more closely.
+
+**Agentic concept:** fan-out / fan-in. Independent work runs in parallel; dependent work (synthesis) waits for all of it.
+
+---
+
+### 4.12 The synthesizer's definition (from `attribution_setup.py`)
+
+```python
+    "synthesizer": AgentDefinition(
+        description="Writes the final sourced brief from the findings in its task. Call it last, after both research reports.",
+        prompt=('You are a synthesis writer with no tools: use only the findings in your task. Your final message must be '
+                'only a JSON object {"statements": [{"text": "...", "citations": [{"source_url": "...", "page_number": 1}]}]}. '
+                "Cite the source_url and page_number of every finding a statement uses, copied exactly from the findings. "
+                "If a finding has no source_url or page_number, still write the statement but leave its citations empty: "
+                "never invent a citation."),
+        tools=[],  # no tools: it reasons only over what its task contains
+        model="inherit",
+        maxTurns=5,
+    ),
+```
+
+**Why it matters:**
+- **`tools=[]`:** the synthesizer can't look anything up. Its brief is its whole world, which is what makes the handoff test clean: no tool can quietly restore the missing metadata.
+- **"never invent a citation":** with no metadata, the right output is an empty `citations` list, not a plausible-looking URL. The stripped run did exactly that, so `invalid` stayed `0`.
+- **The output contract is JSON statements with citations,** the shape `verify_attribution()` reads.
+
+**Agentic concept:** least privilege makes failures visible. A synthesizer with a search tool could have hidden the broken handoff by re-finding sources.
+
+---
+
+### 4.13 What `run_coordinator()` records for this POC (from `coordinator.py`)
+
+`run_coordinator()` is the same function POC 1 uses (its article walks through it in full). POC 2 relies on four of the fields it stores per Agent call:
+
+```python
+                    if block.name in ("Agent", "Task") and message.parent_tool_use_id is None:  # a spawn
+                        agent_calls[block.id] = {
+                            "id": block.id, "subagent_type": block.input.get("subagent_type"),
+                            "prompt": block.input.get("prompt", ""), "report": None,
+                            "message_id": message.message_id,  # Agent calls in ONE response share it (C15)
+                            "started": time.monotonic() - begin, "finished": None,
+                        }
+...
+                    if isinstance(block, ToolResultBlock) and block.tool_use_id in agent_calls:
+                        agent_calls[block.tool_use_id]["report"] = text_of(block.content)
+                        agent_calls[block.tool_use_id]["finished"] = time.monotonic() - begin
+```
+
+| Field | Used for |
+|-------|----------|
+| `prompt` | `check_metadata_passed()`: what crossed the handoff |
+| `report` | `parse_findings()` (researchers) and `verify_attribution()` (synthesizer) |
+| `message_id` | `delegation_timing()`: `responses` |
+| `started`, `finished` | `delegation_timing()`: overlap and durations; `waited` in `main()` |
+
+`delegation_timing()` is the function described in POC 1's article: distinct `message_id`s, whether every call started before every other finished, and the time from the first spawn to the last report.
+
+---
+
+### 4.14 `common.py`: settings and the log
+
+`common.py` is the same as in POC 1: `Settings` with `model_id`, `max_turns` and `max_budget_usd` (defaults `claude-sonnet-5-5`, `20`, `1.00`); `setup_logging()` writing `HH:MM:SS  message` to the console and the log file; and `log_model_io()` tagging each model input or output with its agent through `parent_tool_use_id`.
+
+| `log_model_io()` branch | Log line tag | Lines in this log |
+|-------------------------|--------------|-------------------|
+| `TextBlock` | `MODEL OUTPUT  text` | 3, one per run |
+| `ToolUseBlock` | `MODEL OUTPUT  tool_use` | 9: 5 `Agent` (one synthesizer per handoff run; web-searcher, doc-analyst and synthesizer in the pipeline), 1 `web_search`, 1 `list_documents`, 2 `read_document` |
+| `ToolResultBlock` | `MODEL INPUT   tool_result` | 9: 5 reports, 4 source results |
+| `ResultMessage` | `MODEL OUTPUT  stop_reason` | 3 |
+| `ThinkingBlock` | `MODEL OUTPUT  thinking` | 0 |
+
+The pipeline's final `text` entry is a Markdown brief that spans 21 lines in the log file: only its first line has a timestamp.
+
+---
+
+## 5. Turn-by-turn trace of each run (real output)
+
+Each trace below is the real run from `logs/poc2_pipeline_20261113_203305.log` (2026-11-13, 20:33:05 to 20:34:05: 60 seconds for all three `query()` calls). Each log line points back to the statement that wrote it (section 3.2's table).
+
+How to read the log blocks:
+- In the log file, every entry is one line. Here, each entry's header (time, `MODEL INPUT` or `MODEL OUTPUT`, kind, `[agent]`) stays on its first line, and its payload is pretty-printed underneath: one key or list item per line.
+- Long text wraps onto a deeper-indented line. A `\n` inside a string ends the line, as it does in the real text.
+- `...` marks text that was cut. A line that starts with `...` summarizes log lines left out.
+
+### 5.1 Run `stripped handoff`: the same claims, no metadata
+
+**Real log:**
+
+```
+20:33:05  MODEL INPUT   prompt       [coordinator]
+          Controlled handoff test. Call the synthesizer subagent once and pass it exactly the
+            text between <<< and >>>, adding nothing: <<<Write a sourced brief answering the
+            question below from these findings. Question: What is known about the Tessaly
+            sodium-ion grid battery pilot at Kestrel Ridge? Findings: {"findings": [
+              {"claim": "The Tessaly pilot delivered 48 MWh of storage at peak demand in 2025.",
+               "analysis": "A published figure on the Tessaly pilot."},
+              {"claim": "Tessaly cells cost $61 per kWh at pack level.", "analysis": "..."},
+              {"claim": "Kestrel Ridge plans a 300 MWh Tessaly expansion by 2028.", ...},
+              {"claim": "No thermal runaway events were recorded across 1,200 charge cycles.",
+               "analysis": "A figure from the local library."},
+              {"claim": "Round-trip efficiency averaged 87.4%.", ...},
+              {"claim": "Capacity fade was 3.1% after the first year.", ...},
+              {"claim": "The board approved $42 million for phase two of the Tessaly
+                 deployment.", ...}]}>>> Then reply with its report unchanged.
+
+20:33:10  MODEL OUTPUT  tool_use     [coordinator]
+          Agent {'description': 'Write sourced brief', 'subagent_type': 'synthesizer',
+                 'prompt': 'Write a sourced brief answering the question below from these
+                     findings. Question: ... Findings: {"findings": [ ...the same 7 findings,
+                     claim and analysis only... ]}'}
+          (id=toolu_01DoDJ2wNCryCTeibdDW2wir)
+
+20:33:14  MODEL INPUT   tool_result  [coordinator]
+          [{'type': 'text',
+            'text': '[Subagent hand-back] ... The report follows:\n
+                  {"statements":[
+                   {"text":"The Tessaly sodium-ion pilot at Kestrel Ridge is reported to have
+                      delivered 48 MWh of storage at peak demand in 2025, but the findings give
+                      no source URL or page number for this figure.","citations":[]},
+                   {"text":"Tessaly cells are reported to cost $61 per kWh at pack level (no
+                      source location provided).","citations":[]},
+                   {"text":"Kestrel Ridge plans a 300 MWh Tessaly expansion by 2028 (no source
+                      location provided).","citations":[]},
+                   {"text":"Performance figures attributed to a local library state that no
+                      thermal runaway events occurred across 1,200 charge cycles, that
+                      round-trip efficiency averaged 87.4%, and that capacity fade was 3.1%
+                      after the first year. These findings lack a specific source URL or page
+                      number, so they cannot be verified here.","citations":[]},
+                   {"text":"A local library figure states that the board approved $42 million
+                      for phase two of the Tessaly deployment (no source location
+                      provided).","citations":[]},
+                   {"text":"Caveat: none of the findings include a source_url or page_number,
+                      so all claims are unsourced and unverified beyond the descriptions
+                      given.","citations":[]}]}\n
+                agentId: a66ce46eace76b452\n
+                <usage>subagent_tokens: 1820\n
+                tool_uses: 0\n
+                duration_ms: 3695</usage>'}]
+          (tool_use_id=toolu_01DoDJ2wNCryCTeibdDW2wir, is_error=None)
+
+20:33:18  MODEL OUTPUT  text         [coordinator]
+          {"statements":[ ...the synthesizer's 6 statements, unchanged... ]}
+20:33:18  MODEL OUTPUT  stop_reason  [coordinator] end_turn  (loop result: success)
+
+20:33:19  Run 'stripped handoff': metadata passed 0/35 -> 6 statement(s), 6 without
+            citations, 0 invalid citation(s), 0 of 7 sources cited
+20:33:19  Run 'stripped handoff': Root cause: metadata was not passed to the synthesizer.
+            Fix the coordinator's handoff, not the synthesizer prompt.
+```
+
+**Which statement wrote each line:** `prompt` by `run_coordinator()`'s `log.info`, with the text from `HANDOFF_TEST` and `strip_metadata(FINDINGS)`; the Agent `tool_use`, the report's `tool_result`, the `text` and the `stop_reason` by `log_model_io()`; the two `Run` lines by `main()`, from `check_metadata_passed()`, `verify_attribution()` and `diagnose()`.
+
+**Variable values:**
+
+| Variable / field | Value | Effect in the code |
+|------------------|-------|--------------------|
+| `researchers` | `[]` | `expected = FINDINGS`; no timing line |
+| `synthesizer["prompt"]` | the fenced text, word for word: 7 findings with `claim` and `analysis` only | `check_metadata_passed()` finds no metadata key |
+| `passed`, `total` | `0`, `35` | `metadata passed 0/35` |
+| `attribution["statements"]` | `6` | The synthesizer merged the three audit figures into one statement and added a caveat statement |
+| `attribution["orphaned"]` | 6 statements, all `"citations": []` | `6 without citations` |
+| `attribution["invalid"]` | `[]` | No invented source |
+| `attribution["cited"]` | empty set | `0 of 7 sources cited` |
+| `diagnose(...)` | `passed < total` → the handoff | `Root cause: metadata was not passed ...` |
+| `message.subtype` / `stop_reason` | `"success"` / `"end_turn"` | The call itself ended normally |
+
+**Lessons from the real data:**
+- **Same facts, no sources.** Every figure from the 7 claims reached the brief. Not one of them could be cited, because the synthesizer never saw a URL or a page.
+- **The synthesizer behaved correctly.** It followed "never invent a citation": empty `citations` everywhere, `0 invalid citation(s)`, and it said so in its own words ("the findings give no source URL or page number for this figure"). Changing its prompt would fix nothing.
+- **The diagnosis named the right place.** `0/35` metadata values crossed the handoff, so `diagnose()` pointed at the coordinator's handoff.
+- **The coordinator was a faithful courier.** Its Agent prompt matches the fenced text, and its final text is the report unchanged. The failure was the payload, decided in Python by `strip_metadata()`.
+
+### 5.2 Run `full handoff`: the same claims, every field
+
+**Real log:**
+
+```
+20:33:19  MODEL INPUT   prompt       [coordinator]
+          Controlled handoff test. ... adding nothing: <<<Write a sourced brief answering the
+            question below from these findings. Question: ... Findings: {"findings": [
+              {"claim": "The Tessaly pilot delivered 48 MWh of storage at peak demand in 2025.",
+               "analysis": "A published figure on the Tessaly pilot.",
+               "source_url": "https://example.com/tessaly/year-one-results",
+               "document_name": "Tessaly Grid Pilot: Year-One Results", "page_number": 3,
+               "confidence": "high", "retrieved_by": "web-searcher"},
+              ... 5 more findings with all 7 keys ...,
+              {"claim": "The board approved $42 million for phase two of the Tessaly
+                 deployment.", "analysis": "A figure from the local library.",
+               "source_url": "https://example.com/library/kestrel-ridge-board-minutes.pdf",
+               "document_name": "Kestrel Ridge Board Minutes, March 2026", "page_number": 4,
+               "confidence": "high", "retrieved_by": "doc-analyst"}]}>>> Then reply with its
+            report unchanged.
+
+20:33:26  MODEL OUTPUT  tool_use     [coordinator]
+          Agent {'description': 'Write sourced brief', 'subagent_type': 'synthesizer',
+                 'prompt': 'Write a sourced brief ... Findings: {"findings": [ ...the same 7
+                     findings, all fields... ]}'}
+          (id=toolu_01KXXxsfjYEafGkpaHJ5bRvt)
+
+20:33:30  MODEL INPUT   tool_result  [coordinator]
+          [{'type': 'text',
+            'text': '[Subagent hand-back] ... The report follows:\n
+                  {"statements":[
+                   {"text":"The Tessaly pilot delivered 48 MWh of storage at peak demand in
+                      2025.","citations":[{"source_url":"https://example.com/tessaly/year-one-
+                      results","page_number":3}]},
+                   {"text":"Tessaly cells are reported to cost $61 per kWh at pack level.",
+                    "citations":[{"source_url":"https://example.org/sodium-ion-cost-tracker-2026",
+                    "page_number":2}]},
+                   ... 4 more statements, one citation each ...,
+                   {"text":"The Kestrel Ridge board approved $42 million for phase two of the
+                      Tessaly deployment (March 2026 minutes).","citations":[{"source_url":
+                      "https://example.com/library/kestrel-ridge-board-minutes.pdf",
+                      "page_number":4}]}]}\n
+                agentId: a3fe1c8bf096f1b1f\n
+                <usage>subagent_tokens: 2562\n
+                tool_uses: 0\n
+                duration_ms: 3750</usage>'}]
+          (tool_use_id=toolu_01KXXxsfjYEafGkpaHJ5bRvt, is_error=None)
+
+20:33:34  MODEL OUTPUT  text         [coordinator]
+          {"statements":[ ...the synthesizer's 7 statements, unchanged... ]}
+20:33:34  MODEL OUTPUT  stop_reason  [coordinator] end_turn  (loop result: success)
+
+20:33:35  Run 'full handoff': metadata passed 35/35 -> 7 statement(s), 0 without citations,
+            0 invalid citation(s), 7 of 7 sources cited
+20:33:35  Run 'full handoff': All claims attributed.
+```
+
+**Variable values:**
+
+| Variable / field | Value | Effect in the code |
+|------------------|-------|--------------------|
+| `synthesizer["prompt"]` | the fenced text: 7 findings with all 7 keys | every metadata key present |
+| `passed`, `total` | `35`, `35` | `metadata passed 35/35` |
+| `attribution` | 7 statements, 0 orphaned, 0 invalid, 7 distinct real pairs | `7 of 7 sources cited` |
+| `diagnose(...)` | nothing orphaned or invalid | `All claims attributed.` |
+
+**Lessons from the real data:**
+- **One variable, opposite result.** Same synthesizer, same system prompt, same claims. Adding the five metadata fields turned 6 unsourced statements into 7 cited ones.
+- **The citations were copied, not invented.** Every `(source_url, page_number)` in the brief is one of the 7 real pairs in `FINDINGS`.
+- **One statement per finding this time.** With sources to cite, the synthesizer kept each audit figure separate, because each has its own page.
+
+### 5.3 Run `parallel pipeline`: fan-out, wait, fan-in
+
+**Real log (condensed):**
+
+```
+── the coordinator's task ────────────────────────────────────────────────────────────────
+
+20:33:35  MODEL INPUT   prompt       [coordinator]
+          Write a sourced brief answering: What is known about the Tessaly sodium-ion grid
+            battery pilot at Kestrel Ridge?
+
+── fan-out: two Agent calls in one response ──────────────────────────────────────────────
+
+20:33:39  MODEL OUTPUT  tool_use     [coordinator]
+          Agent {'description': 'Web research on Tessaly pilot', 'subagent_type': 'web-searcher',
+                 'prompt': 'Research question: What is known about the Tessaly sodium-ion grid
+                     battery pilot at Kestrel Ridge? Search the web and return findings, each
+                     with source URL, title, and the relevant claim/snippet.'}
+          (id=toolu_01FqtBYWh7Zd1cFJMpC1szm4)
+20:33:40  MODEL OUTPUT  tool_use     [coordinator]
+          Agent {'description': 'Library research on Tessaly pilot', 'subagent_type': 'doc-analyst',
+                 'prompt': 'Research question: What is known about the Tessaly sodium-ion grid
+                     battery pilot at Kestrel Ridge? Read the local document library (list
+                     documents, then read relevant ones) and return findings with document
+                     names, titles, URLs and page references, plus the relevant claims.'}
+          (id=toolu_01PybjY5jfkEobQ2KydUKwVU)
+
+20:33:41  MODEL OUTPUT  tool_use     [web-searcher]
+          mcp__sources__web_search {'query': 'Tessaly sodium-ion grid battery pilot Kestrel Ridge'}
+          (id=toolu_01AQQBCvZRF9o6nwNFVohQMq)
+20:33:41  MODEL INPUT   tool_result  [web-searcher]
+          [{'type': 'text', 'text': '[ ...the 3 web results... ]'}]
+          (tool_use_id=toolu_01AQQBCvZRF9o6nwNFVohQMq, is_error=None)
+20:33:42  ... list_documents, then read_document 'tessaly-safety-audit.pdf' (20:33:43) and
+              'kestrel-ridge-board-minutes.pdf' (20:33:44) [doc-analyst], each followed by its
+              tool_result, all is_error=None ...
+
+── fan-in: both reports ──────────────────────────────────────────────────────────────────
+
+20:33:45  MODEL INPUT   tool_result  [coordinator]
+          [{'type': 'text',
+            'text': '  <tools-used-before-summary>mcp__sources__web_search</tools-used-before-summary>\n
+                  \n
+                [Subagent hand-back] ... The report follows:\n
+                  {"findings": [
+                  {"claim": "The Tessaly pilot delivered 48 MWh of storage at peak demand in
+                     2025.", ..., "page_number": 3, "confidence": "medium",
+                   "retrieved_by": "web-search-specialist"},
+                  {"claim": "Tessaly sodium-ion cells cost $61 per kWh at pack level,
+                     according to a 2026 cost tracker.", ..., "page_number": 2, ...},
+                  {"claim": "Kestrel Ridge plans a 300 MWh Tessaly expansion by 2028.",
+                   "analysis": "This shows the pilot is expected to grow to about six times
+                     the 48 MWh reported in year one. ...", ..., "page_number": 1, ...}]}\n
+                agentId: a2bc1ff0796677840\n
+                <usage>subagent_tokens: 2575\n
+                tool_uses: 1\n
+                duration_ms: 6168</usage>'}]
+          (tool_use_id=toolu_01FqtBYWh7Zd1cFJMpC1szm4, is_error=None)
+20:33:48  MODEL INPUT   tool_result  [coordinator]
+          [{'type': 'text',
+            'text': '  <tools-used-before-summary>mcp__sources__list_documents,
+                  mcp__sources__read_document</tools-used-before-summary>\n ... The report
+                  follows:\n
+                  {"findings": [ ...4 findings, pages 2, 5, 7 and 4, "confidence": "high",
+                   "retrieved_by": "document analyst"... ]}\n
+                agentId: aa4f924871fbec0fd\n
+                <usage>subagent_tokens: 3031\n
+                tool_uses: 3\n
+                duration_ms: 8185</usage>'}]
+          (tool_use_id=toolu_01PybjY5jfkEobQ2KydUKwVU, is_error=None)
+
+── synthesis: every finding, every field ─────────────────────────────────────────────────
+
+20:33:55  MODEL OUTPUT  tool_use     [coordinator]
+          Agent {'description': 'Write final sourced brief', 'subagent_type': 'synthesizer',
+                 'prompt': '{"findings": [
+                     {"claim": "The Tessaly pilot delivered 48 MWh of storage at peak demand
+                        in 2025.", "analysis": "This is the only operational result ...",
+                      "source_url": "https://example.com/tessaly/year-one-results",
+                      "document_name": "Tessaly Grid Pilot: Year-One Results",
+                      "page_number": 3, "confidence": "medium",
+                      "retrieved_by": "web-search-specialist"},
+                     ... the other 6 findings, copied from the two reports with every field ...]}'}
+          (id=toolu_013jdpGTCYVrrLXe75d5y6re)
+
+20:34:00  MODEL INPUT   tool_result  [coordinator]
+          [{'type': 'text',
+            'text': '[Subagent hand-back] ... The report follows:\n
+                  {"statements": [
+                   {"text": "The Tessaly pilot delivered 48 MWh of storage at peak demand in
+                      2025, according to the year-one report.", "citations": [{"source_url":
+                      "https://example.com/tessaly/year-one-results", "page_number": 3}]},
+                   ...,
+                   {"text": "Kestrel Ridge plans a 300 MWh Tessaly expansion by 2028, which is
+                      about six times the 48 MWh reported in year one. ...", "citations": [
+                      {"source_url": "https://example.net/kestrel-ridge/news/tessaly-expansion",
+                       "page_number": 1},
+                      {"source_url": "https://example.com/tessaly/year-one-results",
+                       "page_number": 3}]},
+                   ... 4 more statements, one citation each ...]}\n
+                agentId: a4a91d2c21822885a\n
+                <usage>subagent_tokens: 3004\n
+                tool_uses: 0\n
+                duration_ms: 5116</usage>'}]
+          (tool_use_id=toolu_013jdpGTCYVrrLXe75d5y6re, is_error=None)
+
+── the coordinator's answer and the script's checks ──────────────────────────────────────
+
+20:34:04  MODEL OUTPUT  text         [coordinator]
+          **Brief: Tessaly sodium-ion grid battery pilot at Kestrel Ridge**
+
+          **Performance**
+          - The pilot delivered 48 MWh of storage at peak demand in 2025, according to the
+            year-one report (https://example.com/tessaly/year-one-results, p. 3).
+          - Round-trip efficiency averaged 87.4% (https://example.com/library/tessaly-safety-
+            audit.pdf, p. 5).
+          ...
+          **Caveats**
+          - The web findings are medium confidence. The library findings are high confidence.
+          - The 48 MWh figure is the only operational output result found.
+          - I did not check whether the safety audit and the year-one report cover the same
+            period.
+20:34:04  MODEL OUTPUT  stop_reason  [coordinator] end_turn  (loop result: success)
+
+20:34:05  Run 'parallel pipeline': metadata passed 35/35 -> 7 statement(s), 0 without
+            citations, 0 invalid citation(s), 7 of 7 sources cited
+20:34:05  Run 'parallel pipeline': All claims attributed.
+20:34:05  Delegation: 1 response(s), overlap=True, 9.3 s in all (web-searcher 6.2 s,
+            doc-analyst 8.2 s); synthesizer started after both reports: True
+```
+
+**Which statement wrote each line:**
+
+| Lines | Written by | What else the code did with that message |
+|-------|------------|------------------------------------------|
+| 20:33:35 `prompt` | `log.info(...)` in `run_coordinator()`; text = `RUNS[2]` | none |
+| 20:33:39, 20:33:40, 20:33:55 `tool_use [coordinator] Agent` | `log_model_io()` | `run_coordinator()` stored `prompt`, `message_id` and `started` in `agent_calls` |
+| `tool_use` / `tool_result` `[web-searcher]`, `[doc-analyst]` | `log_model_io()`; tag via `agent_names`; content from the source tools | `research_calls` (not used here) |
+| 20:33:45, 20:33:48, 20:34:00 `tool_result [coordinator]` | `log_model_io()` | `run_coordinator()` stored `report` and `finished` |
+| 20:34:04 `text`, `stop_reason` | `log_model_io()` | `subtype`, `output` |
+| 20:34:05 `Run ...` × 2 | `log.info(...)` in `main()` | from `check_metadata_passed()`, `verify_attribution()`, `diagnose()` |
+| 20:34:05 `Delegation: ...` | `log.info(...)` in `main()` | from `delegation_timing()` and `waited` |
+
+**What each step did and which code ran:**
+
+| Step | Agent | Claude asked for | Code that ran | Result |
+|------|-------|------------------|---------------|--------|
+| 1 | coordinator | `Agent` → `web-searcher` **and** `Agent` → `doc-analyst`, one response | The SDK starts both subagents | Two runs under ids `toolu_01Fqt...` and `toolu_01Pyb...` |
+| 2 | web-searcher | `web_search` | `web_search()` | 3 results |
+| 2′ | doc-analyst | `list_documents`, `read_document` × 2 | `list_documents()`, `read_document()` | 2 names, then 4 pages + 1 page |
+| 3 | both → coordinator | *(final JSON)* | none | 3 findings (20:33:45), then 4 findings (20:33:48) |
+| 4 | coordinator | `Agent` → `synthesizer`, prompt = `{"findings": [...7...]}` | The SDK starts the synthesizer (no tools) | A run under id `toolu_013jd...` |
+| 5 | synthesizer → coordinator | *(final JSON)* | none | 7 statements, 8 citations, 7 distinct real sources |
+| 6 | coordinator | *(no tool)*: a Markdown brief | none | `end_turn` |
+
+**Variable values at the end of the run:**
+
+| Variable / field | Value |
+|------------------|-------|
+| `researchers` | 2 calls: `web-searcher`, `doc-analyst` |
+| `expected` | the 7 findings parsed from the two reports (`retrieved_by` `web-search-specialist` / `document analyst`) |
+| `passed`, `total` | `35`, `35` |
+| `attribution` | 7 statements, 0 orphaned, 0 invalid, 7 distinct real pairs |
+| `timing` | `{"responses": 1, "overlap": True, "delegation_seconds": 9.3, "durations": {"web-searcher": 6.2, "doc-analyst": 8.2}}` (rounded as logged) |
+| `waited` | `True`: the synthesizer was spawned after the later report |
+| `result["output"]` | the Markdown brief (`message.result`) |
+
+**Lessons from the real data:**
+- **Parallel spawning worked from a prompt rule.** Two Agent calls, one `message_id`, both logged before any result. Nothing in the code spawned them; the coordinator followed `PARALLEL_RULE`.
+- **The round got shorter.** 9.3 s here vs POC 1's sequential 15.9 s. Each subagent took about the same time in both runs (6.2 s and about 8 s); only the overlap changed.
+- **Fan-in waited for both.** The synthesizer started 7 s after the second report, with all 7 findings. `waited` is `True`.
+- **The coordinator passed everything through.** `35/35`: it copied the two reports' findings into the synthesizer's prompt without dropping or shortening a field, as its system prompt demands. That includes the imperfect `retrieved_by` values POC 1's article discusses.
+- **Analysis travels with content.** The web-searcher's analysis compared the expansion to year-one output ("about six times the 48 MWh"). The synthesizer kept that comparison, and cited both sources it depends on.
+- **The coordinator added caveats of its own.** Its final brief notes the confidence levels and an open question about the audit period. Those come from the findings' `confidence` field and analysis, not from new research.
+
+### 5.4 The three runs side by side
+
+| | `stripped handoff` | `full handoff` | `parallel pipeline` |
+|-|--------------------|----------------|---------------------|
+| Prompt | `HANDOFF_TEST` + `strip_metadata(FINDINGS)` | `HANDOFF_TEST` + `FINDINGS` | "Write a sourced brief answering: ..." |
+| Agent calls | 1 (synthesizer) | 1 (synthesizer) | 3 (web-searcher + doc-analyst in one response, then synthesizer) |
+| Source tool calls | 0 | 0 | 4 (inside the research subagents) |
+| `metadata passed` | `0/35` | `35/35` | `35/35` |
+| Statements / without citations / invalid | 6 / 6 / 0 | 7 / 0 / 0 | 7 / 0 / 0 |
+| Sources cited | 0 of 7 | 7 of 7 | 7 of 7 |
+| Diagnosis | Root cause: metadata not passed | All claims attributed. | All claims attributed. |
+| `Delegation` | none | none | 1 response, overlap, 9.3 s; waited: `True` |
+| Synthesizer `subagent_tokens` | 1820 | 2562 | 3004 |
+| Final `subtype` / `stop_reason` | `success` / `end_turn` | `success` / `end_turn` | `success` / `end_turn` |
+| Coordinator's final text | the synthesizer's JSON, unchanged | the synthesizer's JSON, unchanged | a Markdown brief with citations |
+| Wall time (from log) | about 13 s | about 15 s | about 29 s |
+
+The log has no `SDK error:` or `no synthesizer report` line, so `main()` returned `0`.
+
+---
+
+## 6. Agentic AI concepts recap
+
+| Concept | How this POC shows it |
+|---------|-----------------------|
+| **Context passing across a handoff** | The synthesizer knows only its Agent prompt; `check_metadata_passed()` reads exactly that prompt. |
+| **The attribution failure pattern** | `strip_metadata()` → `0/35` → 6 statements with no citations. |
+| **Structured results passed whole** | Full handoff and pipeline: `35/35` → every statement cited. |
+| **Diagnose the handoff first** | `diagnose()` checks `passed < total` before suspecting the synthesizer. |
+| **Verifiable attribution** | `verify_attribution()`: no orphaned claims, no invalid `(url, page)` pairs. |
+| **Least privilege for the synthesizer** | `tools=[]`: it can't paper over a broken handoff by searching again. |
+| **"Never invent a citation"** | Stripped run: empty citations, `0 invalid citation(s)`. |
+| **Parallel fan-out** | `PARALLEL_RULE`; two Agent calls in one response; `1 response(s), overlap=True`. |
+| **Wait before fan-in** | `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`; `synthesizer started after both reports: True`. |
+| **Latency awareness** | 9.3 s in parallel vs 15.9 s sequential (POC 1), for subagents of about the same duration. |
+| **Controlled experiments** | `HANDOFF_TEST` fixes the payload, so only the metadata changes between runs. |
+
+---
+
+## 7. Common mistakes this POC helps you avoid
+
+1. **Passing only the claim text to the synthesizer.** The brief will have facts and no sources (`stripped handoff`).
+2. **Blaming the synthesizer for unsourced claims.** It wrote empty citations because it had nothing to cite. Check what crossed the handoff first.
+3. **"Summarizing" findings in the coordinator.** Dropping or shortening fields loses exactly what attribution needs. Pass the structure unchanged.
+4. **Letting the synthesizer invent citations.** A plausible URL is worse than an empty list: `verify_attribution()` would flag it as `invalid`, but a reader wouldn't.
+5. **Checking only that citations exist.** Verify each `(source_url, page_number)` against the real sources.
+6. **Spawning independent subagents in two responses.** The round costs the sum of both. Put both Agent calls in one response.
+7. **Starting synthesis before every report is in.** Background subagents could return later; wait for all of them (`CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`, and check `waited`).
+8. **Giving the synthesizer tools "just in case".** With `tools=[]` the handoff is the only input, so its quality is visible.
+9. **Reading `success` as "the brief is sourced".** All three runs ended `success` / `end_turn`; only the attribution check told them apart.
+
+---
+
+## 8. Claude Architect exam lens
+
+### 8.1 What the exam tests on this topic
+
+The objectives come from `curriculum/01-Agentic-Architecture-&-Orchestration/03-raw-Subagent-Invocation-and-Context-Passing.md`. POC 2 covers objectives 4 to 6, on top of POC 1's 1 to 3.
+
+| Exam objective | What a correct answer looks like | Where this POC shows it |
+|----------------|----------------------------------|-------------------------|
+| 3. A format that separates content from metadata | Findings carry `claim`, `analysis` and `source_url`, `document_name`, `page_number`, `confidence`, `retrieved_by`. When a synthesis agent produces unsourced claims, the root cause is a coordinator that passed content without that metadata. | `FINDINGS`; `strip_metadata()` vs the full payload |
+| 4. Pass complete structured results to a synthesis subagent | The coordinator passes the whole findings array, every metadata field intact; nothing is stripped or summarized. | Run `full handoff` and the pipeline: `metadata passed 35/35`; the handoff rule in `coordinator_prompt()` |
+| 5. Every claim attributed to a URL and a page | A synthesis report where every factual claim cites a source URL and page number, and no claim is orphaned. If one is, check whether the metadata was passed before blaming the synthesis prompt. | `verify_attribution()`, `diagnose()`; run `stripped handoff` → `Root cause: metadata was not passed ...` |
+| 6. Parallel spawning: multiple Agent (Task) calls in one response | Independent subagents are spawned in one coordinator response and run at the same time; the coordinator waits for both before synthesis. Sequential spawning of independent work wastes time. | `PARALLEL_RULE`; `Delegation: 1 response(s), overlap=True, 9.3 s ...; synthesizer started after both reports: True` vs POC 1's `2 response(s), overlap=False, 15.9 s` |
+
+> **Exam tip:** the exam phrases parallel spawning as "multiple Task tool calls in a single response". In the Agent SDK the tool is `Agent` in tool calls (`Task` in the `init` list), and the SDK runs both subagents when one response holds both calls. The tell-tale in a trace is two Agent `tool_use` blocks before either report, sharing one `message_id`.
+
+### 8.2 The same pipeline with the raw Messages API
+
+With the raw Messages API you run each subagent yourself, so parallelism and the handoff are in your code. Claude can still ask for both subagents in one response; you decide to run them concurrently.
+
+```python
+import asyncio
+import json
+
+import anthropic
+
+client = anthropic.AsyncAnthropic()
+# SUBAGENTS, AGENT_TOOL and agent_loop() are as in POC 1's raw version, made async.
+
+
+async def run_agent_calls(response) -> list[dict]:
+    """Run every agent tool_use block of ONE response at the same time; return one tool_result each."""
+    calls = [block for block in response.content if block.type == "tool_use" and block.name == "agent"]
+    reports = await asyncio.gather(*(run_subagent(c.input["subagent_type"], c.input["prompt"]) for c in calls))
+    return [{"type": "tool_result", "tool_use_id": c.id, "content": report} for c, report in zip(calls, reports)]
+
+
+def synthesizer_brief(question: str, findings: list[dict]) -> str:
+    # The handoff: every finding, every field. The stripped version would be
+    # [{k: f[k] for k in ("claim", "analysis")} for f in findings] -- the exam's failure pattern.
+    return f"Write a sourced brief answering: {question}\n" + json.dumps({"findings": findings})
+```
+
+| Raw Messages API (you write it) | Agent SDK (`poc2_pipeline.py`) |
+|---------------------------------|--------------------------------|
+| Claude returns two `agent` `tool_use` blocks in one response | Claude returns two `Agent` `tool_use` blocks in one response (`PARALLEL_RULE`) |
+| `asyncio.gather()` runs both subagent loops concurrently | The SDK runs both subagents; `overlap=True` in `delegation_timing()` |
+| You send both `tool_result`s back in one user message, then let Claude continue | The reports arrive as `ToolResultBlock`s; the coordinator continues after both (`CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`) |
+| `synthesizer_brief()`: your code decides what crosses the handoff | The coordinator model writes the synthesizer's Agent `prompt`; `coordinator_prompt()` tells it to pass every finding unchanged |
+| Verify the brief's citations in your code | `verify_attribution()` on the synthesizer's report |
+
+The exam concept is the same in both: what the synthesis agent can cite depends entirely on what the coordinator puts in its input.
+
+### 8.3 Scenario questions
+
+Try each one before reading the answer. These questions were written for this article to match the curriculum objectives above. They are not official exam questions.
+
+---
+
+**Scenario 1: A brief with no sources**
+
+A research system's final brief states correct figures, but none of its claims cites a source. The research subagents' reports, checked separately, have a URL and page number on every finding. What is the most likely root cause?
+
+- A. The synthesis subagent's prompt doesn't ask for citations strongly enough.
+- B. The coordinator passed the synthesis subagent only the claim text, without the metadata.
+- C. The research subagents used the wrong search tool.
+- D. The synthesis subagent needs a larger model.
+
+**Answer: B.** The facts survived and the sources didn't, so something between the research reports and the synthesizer dropped the metadata: the coordinator's handoff. A, C and D change parts that worked. *POC link:* run `stripped handoff`: `metadata passed 0/35 -> 6 statement(s), 6 without citations`, and `diagnose()` points at the handoff.
+
+---
+
+**Scenario 2: Where to look first**
+
+An architect sees orphaned claims in a synthesis report. A teammate wants to start by rewriting the synthesis prompt. What should the architect check first?
+
+- A. The synthesis prompt's wording.
+- B. Whether the source metadata actually reached the synthesis agent, in the input it received.
+- C. The research agents' `maxTurns`.
+- D. The temperature setting.
+
+**Answer: B.** The exam's diagnostic order: trace the data across the handoff before changing any agent. If the metadata never arrived, no prompt change can fix it. *POC link:* `diagnose()` checks `passed < total` first; only when the metadata reached the synthesizer does it say "now review its prompt".
+
+---
+
+**Scenario 3: The helpful summary**
+
+To "save tokens", a coordinator rewrites each finding as one sentence, `"<claim> (from the web)"`, before passing the findings to the synthesis agent. What happens to attribution?
+
+- A. Nothing: "from the web" is enough attribution.
+- B. The synthesis agent can no longer cite a URL or page number, so its claims become unsourced or vaguely sourced.
+- C. The synthesis agent will ask the research agents for the URLs.
+- D. Attribution improves because the input is shorter.
+
+**Answer: B.** Summarizing is stripping by another name: `source_url`, `page_number` and the rest are gone. C can't happen: subagents can't talk to each other, and the synthesizer has no tools here. *POC link:* `coordinator_prompt()` says "Never drop, shorten or summarize any field"; `check_metadata_passed()` counts a value only when it arrives unchanged.
+
+---
+
+**Scenario 4: Verifying the brief**
+
+A team wants to confirm that its synthesis output is properly attributed. Which check is sufficient?
+
+- A. Every statement has a non-empty `citations` list.
+- B. Every statement has at least one citation, and every cited `(source_url, page_number)` pair exists among the findings that were passed in.
+- C. The brief mentions at least one URL.
+- D. The synthesis agent's final message says "all claims are sourced".
+
+**Answer: B.** A catches orphaned claims but not invented or garbled sources; C and D check nothing specific. *POC link:* `verify_attribution()` returns both `orphaned` and `invalid`; the log line reports `without citations` and `invalid citation(s)` separately.
+
+---
+
+**Scenario 5: The synthesizer with no metadata**
+
+A synthesis agent receives findings that have no URLs or page numbers. Its prompt says "Cite every claim." What is the best behavior to design for?
+
+- A. Cite the most likely source for each claim.
+- B. Leave the claim's citations empty and say the sources are missing, never inventing a citation.
+- C. Refuse to write anything.
+- D. Search the web to find sources.
+
+**Answer: B.** An invented citation looks valid and misleads the reader; an empty one is honest and lets the check find the real failure. D needs tools a synthesizer shouldn't have. *POC link:* the synthesizer's prompt ("never invent a citation"); the stripped run's report: 6 statements, empty `citations`, and a caveat statement, with `0 invalid citation(s)`.
+
+---
+
+**Scenario 6: Slow research round**
+
+A coordinator spawns a web-search subagent, waits for its report, then spawns a document-analysis subagent. Neither task needs the other's output. The round takes about the sum of both. What should change?
+
+- A. Merge both subagents into one.
+- B. Have the coordinator emit both Agent (Task) calls in one response, so the subagents run in parallel, and wait for both reports before synthesis.
+- C. Run the synthesis subagent at the same time as the research subagents.
+- D. Lower both subagents' `maxTurns`.
+
+**Answer: B.** Independent subagents in one response run at the same time; the round costs about the slower one. C breaks the dependency: synthesis needs both reports. *POC link:* `PARALLEL_RULE`; the pipeline's `1 response(s), overlap=True, 9.3 s` vs POC 1's `2 response(s), overlap=False, 15.9 s`.
+
+---
+
+**Scenario 7: Reading a trace for parallelism**
+
+Which trace shows that two subagents were spawned in parallel?
+
+- A. Agent call A, report A, Agent call B, report B.
+- B. Agent call A and Agent call B, both before any report, from the same coordinator response.
+- C. Two reports arriving in the same second.
+- D. Two subagents using different tools.
+
+**Answer: B.** Parallel spawning means both calls come from one response, before either result. A is sequential; C can happen by chance; D says nothing about timing. *POC link:* the pipeline log: Agent calls at 20:33:39 and 20:33:40, first report at 20:33:45; `run_coordinator()` records one `message_id` for both, so `responses` is `1`.
+
+---
+
+**Scenario 8: Synthesis started too early**
+
+In a pipeline, subagents run in the background, and the coordinator spawns the synthesis agent as soon as the first research report arrives. Some briefs miss all the document-analysis findings. What is the fix?
+
+- A. Give the synthesis agent the document tools.
+- B. Wait for every research report before spawning the synthesis agent, and check that it started after the last one.
+- C. Spawn the synthesis agent twice.
+- D. Shorten the document analysis.
+
+**Answer: B.** Fan-in must wait for the whole fan-out; otherwise synthesis works on a partial set. *POC link:* `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` in `build_pipeline_options()`, "wait for both reports" in `PARALLEL_RULE`, and `waited` in `main()`: `synthesizer started after both reports: True`.
+
+---
+
+**Scenario 9: Testing the handoff in isolation**
+
+A team suspects its attribution bug is in the handoff, but the coordinator rewrites the findings differently on every run, which makes the bug hard to pin down. How can they test the handoff alone?
+
+- A. Run the full pipeline many times and average the results.
+- B. Fix the payload: have the coordinator pass an exact, pre-built text to the synthesis agent, once with metadata and once without, and compare the outputs.
+- C. Remove the coordinator and call the synthesis agent's tools directly.
+- D. Increase the synthesis agent's `maxTurns`.
+
+**Answer: B.** A controlled handoff removes the coordinator's variability: only the payload changes, so the difference in output is caused by the metadata. *POC link:* `HANDOFF_TEST` with `strip_metadata(FINDINGS)` and `FINDINGS`: `0/35` → 6 orphaned statements, `35/35` → all 7 attributed.
+
+---
+
+**Scenario 10: Every check passed, but the brief is thin**
+
+A pipeline's checks pass (`35/35` metadata, every claim cited). A reviewer notices that the coordinator's prompt to the synthesis agent held only the findings JSON, with no question and no instructions. Is that a problem?
+
+- A. No problem at all: findings are all a synthesizer ever needs.
+- B. It worked here because the synthesis agent's own system prompt defines the task, but the brief would be safer if it also stated the research question, since the subagent sees nothing else.
+- C. Yes: the synthesis agent can't produce JSON without the question.
+- D. Yes: metadata can't pass without instructions.
+
+**Answer: B.** The synthesizer's system prompt carried the task, so the run succeeded. But a subagent knows only its system prompt and its brief; the research question in the brief lets it write an answer to that question, not just a list of findings. *POC link:* the pipeline's synthesizer call at 20:33:55: its whole `prompt` is `{"findings": [...]}`, and the brief still came back fully attributed.
+
+---
+
+### 8.4 Quick-recall cheat sheet
+
+```
+finding                → content (claim, analysis) + metadata (source_url, document_name, page_number, confidence, retrieved_by)
+unsourced claims       → root cause = metadata stripped in the coordinator's handoff, not the synthesis prompt
+the handoff            → pass every finding, every field, unchanged; never drop, shorten or summarize
+diagnose in order      → 1) are claims orphaned/invalid? 2) did the metadata reach the synthesizer? 3) only then its prompt
+verify attribution     → no statement without citations; every (source_url, page_number) cited must be real
+synthesizer            → no tools; "never invent a citation" (empty citations beat fake ones)
+parallel spawn         → several Agent (Task) calls in ONE response; same message_id; both before any report
+sequential spawn       → independent work back to back; round ≈ sum of both (POC 1: 15.9 s vs 9.3 s here)
+fan-in                 → wait for every report before synthesis (no background subagents; check the timing)
+controlled handoff     → fix the payload (<<< >>>) to test metadata passing without the coordinator's variability
+subtype "success"      → says the loop ended, not that the brief is sourced
+```
+
+---
+
+## 9. How to run it
+
+```bash
+cd 01-Agentic-Architecture-Orchestration/03-Subagent-Invocation-and-Context-Passing
+source .venv/bin/activate        # the folder's venv (claude-agent-sdk 0.2.181)
+python poc1_gate_test.py         # paid: POC 1, the gate test (its Delegation line is the sequential baseline)
+python poc2_pipeline.py          # paid: 3 runs, 3 query() calls, uses ANTHROPIC_API_KEY from .env
+```
+
+- Both scripts call the API. This folder has no free offline demo.
+- `.env` needs `ANTHROPIC_API_KEY`; copy `.env.example` and fill it in. `MODEL_ID`, `MAX_TURNS` and `MAX_BUDGET_USD` fall back to `claude-sonnet-5-5`, `20` and `1.00`. The pipeline run starts a coordinator and three subagents in one call.
+- Every model input and output, plus the per-run result lines, goes to the console and to `logs/poc2_pipeline_<date>_<time>.log`. Wording, statement counts and timings vary between runs; the `0/35` vs `35/35` contrast doesn't.
+- The exit code is `0` when all three runs finish, even if a run's checks fail (that's logged and skipped). It's `1` on a setup failure or an SDK runtime failure (`ClaudeSDKError`).

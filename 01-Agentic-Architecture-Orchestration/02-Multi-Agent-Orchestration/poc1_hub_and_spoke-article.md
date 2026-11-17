@@ -3,6 +3,7 @@
 > **File:** `poc1_hub_and_spoke.py` (with `coordinator.py`, `research_setup.py` and `common.py`)
 > **Domain:** 01 Agentic Architecture & Orchestration → 02 Multi-Agent Orchestration
 > **SDK:** Claude Agent SDK for Python (`claude-agent-sdk >=0.2.174,<0.3`; 0.2.174 in the folder's `.venv`)
+> **Page:** https://claude.ai/artifact/NfVUWt7oRXdC4exqdxsPXe
 
 ---
 

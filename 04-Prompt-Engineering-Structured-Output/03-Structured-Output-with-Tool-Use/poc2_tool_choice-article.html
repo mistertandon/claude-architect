@@ -1,0 +1,1349 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>POC 2 Tool Choice Modes</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: sticky loop-map TOC on the left, one reading column; code reads as a terminal in both themes. */
+:root {
+  --bg: #F2F4F9;
+  --surface: #FFFFFF;
+  --ink: #131A2C;
+  --muted: #5A637B;
+  --line: #D8DDE9;
+  --accent: #2E49D6;
+  --accent-soft: #E3E8FC;
+  --signal: #B45309;
+  --signal-soft: #FBEEDC;
+  --ok: #15803D;
+  --ok-soft: #DDF3E4;
+  --bad: #B91C1C;
+  --bad-soft: #FBE3E3;
+  --term-bg: #0E1424;
+  --term-fg: #D5DDF0;
+  --term-dim: #7D88A6;
+  --term-line: #1F2840;
+  --hl-key: #9DB0FF;
+  --hl-str: #F2C27B;
+  --hl-num: #7FD6B0;
+  --hl-com: #6E7896;
+  --hl-fn: #E9A2D6;
+  --c1: #2E49D6; --c2: #6D3FD6; --c3: #0F8A82; --c4: #C42F6B; --c5: #B45309; --c6: #15803D;
+  --f-display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --f-body: "IBM Plex Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0C101B; --surface: #131A2A; --ink: #E5E9F4; --muted: #97A1B9; --line: #252E45;
+    --accent: #8EA3FF; --accent-soft: #1B2447; --signal: #F4B457; --signal-soft: #2E2312;
+    --ok: #5DD39A; --ok-soft: #10291D; --bad: #FF8A8A; --bad-soft: #321616;
+    --term-bg: #070A12; --term-line: #1A2236;
+    --c1: #8EA3FF; --c2: #B49CFF; --c3: #4FD1C5; --c4: #FF7AAE; --c5: #F4B457; --c6: #5DD39A;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0C101B; --surface: #131A2A; --ink: #E5E9F4; --muted: #97A1B9; --line: #252E45;
+  --accent: #8EA3FF; --accent-soft: #1B2447; --signal: #F4B457; --signal-soft: #2E2312;
+  --ok: #5DD39A; --ok-soft: #10291D; --bad: #FF8A8A; --bad-soft: #321616;
+  --term-bg: #070A12; --term-line: #1A2236;
+  --c1: #8EA3FF; --c2: #B49CFF; --c3: #4FD1C5; --c4: #FF7AAE; --c5: #F4B457; --c6: #5DD39A;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } *, *::before, *::after { animation: none !important; transition: none !important; } }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: var(--f-body); font-size: 16.5px; line-height: 1.7;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  -webkit-font-smoothing: antialiased;
+}
+::selection { background: var(--accent); color: var(--surface); }
+a { color: var(--accent); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+
+/* progress bar */
+.progress { position: fixed; top: 0; left: 0; right: 0; height: calc(3px + env(safe-area-inset-top, 0px)); z-index: 20; pointer-events: none; }
+.progress span { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), var(--signal)); transform-origin: left; }
+
+/* hero */
+.hero { max-width: 1180px; margin: 0 auto; padding-block: 56px 40px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 40px; align-items: center; }
+.hero h1 { font-family: var(--f-display); font-weight: 800; font-size: clamp(2.1rem, 5.2vw, 3.9rem); line-height: 1.02; letter-spacing: -0.025em; margin: 0; text-wrap: balance; }
+.hero h1 .eyebrow { display: inline-block; font-family: var(--f-mono); font-weight: 600; font-size: 0.8rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent); background: var(--accent-soft); padding: 4px 10px; border-radius: 6px; margin-bottom: 18px; }
+.hero h1 .rest { display: block; }
+.meta { list-style: none; padding: 0; margin: 26px 0 0; display: flex; flex-wrap: wrap; gap: 10px; }
+.meta li { font-size: 0.86rem; line-height: 1.45; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; color: var(--muted); max-width: 100%; }
+.meta li strong { color: var(--ink); font-weight: 600; }
+
+/* orbit ornament: the loop */
+.orbit { width: 220px; aspect-ratio: 1; max-width: 100%; position: relative; }
+.orbit::before { content: ""; position: absolute; inset: 0; border-radius: 50%; border: 1.5px dashed var(--line); }
+.orbit::after { content: ""; position: absolute; inset: 34px; border-radius: 50%; border: 1.5px solid var(--accent); opacity: .35; }
+.orbit .dot { position: absolute; inset: 0; animation: spin 6s linear infinite; }
+.orbit .dot::before { content: ""; position: absolute; top: -7px; left: calc(50% - 7px); width: 14px; height: 14px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 6px var(--accent-soft); }
+.orbit .core { position: absolute; inset: 78px; border-radius: 50%; background: var(--signal); box-shadow: 0 0 0 10px var(--signal-soft); animation: pulse 6s ease-in-out infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes pulse { 0%, 85%, 100% { transform: scale(1); } 92% { transform: scale(1.15); } }
+
+/* shell */
+.shell { max-width: 1180px; margin: 0 auto; display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 56px; padding-block: 0 96px; }
+.toc { position: sticky; top: calc(24px + env(safe-area-inset-top, 0px)); align-self: start; max-height: calc(100vh - 48px); overflow-y: auto; padding-right: 6px; }
+.toc summary { font-family: var(--f-mono); font-size: 0.72rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); cursor: pointer; list-style: none; padding-block: 6px; }
+.toc summary::-webkit-details-marker { display: none; }
+.toc ol { list-style: none; margin: 8px 0 0; padding: 0; border-left: 2px solid var(--line); }
+.toc a { display: block; padding: 6px 0 6px 14px; margin-left: -2px; border-left: 2px solid transparent; color: var(--muted); text-decoration: none; font-size: 0.9rem; line-height: 1.35; transition: color .15s, border-color .15s; }
+.toc a:hover { color: var(--ink); }
+.toc a.active { color: var(--accent); border-left-color: var(--accent); font-weight: 500; }
+.toc a.sub { padding-left: 28px; font-size: 0.82rem; }
+
+/* article */
+article { min-width: 0; max-width: 780px; }
+article > * { margin-block: 0 1.1em; }
+article h2 { font-family: var(--f-display); font-weight: 800; font-size: clamp(1.6rem, 3.2vw, 2.2rem); line-height: 1.12; letter-spacing: -0.02em; margin: 2.6em 0 0.8em; padding-top: 1em; border-top: 1px solid var(--line); text-wrap: balance; scroll-margin-top: 24px; }
+article h2:first-of-type { margin-top: 0.4em; }
+article h3 { font-family: var(--f-display); font-weight: 700; font-size: 1.32rem; line-height: 1.25; letter-spacing: -0.01em; margin: 2em 0 0.6em; text-wrap: balance; scroll-margin-top: 24px; }
+article h4 { font-family: var(--f-mono); font-weight: 600; font-size: 0.95rem; margin: 1.8em 0 0.5em; color: var(--ink); scroll-margin-top: 24px; }
+.num { display: inline-block; font-family: var(--f-mono); font-weight: 600; color: var(--accent); margin-right: 0.35em; font-size: 0.72em; vertical-align: 0.18em; letter-spacing: 0; }
+article h3 .num { font-size: 0.78em; vertical-align: 0.08em; }
+article p, article li { max-width: 68ch; }
+article strong { font-weight: 600; }
+article ul, article ol { padding-left: 1.3em; }
+article li { margin-block: 0.3em; }
+article li::marker { color: var(--accent); }
+hr { border: 0; height: 1px; background: var(--line); margin: 2.4em 0; }
+hr:has(+ h2), hr:first-child { display: none; }
+
+code { font-family: var(--f-mono); font-size: 0.86em; background: var(--accent-soft); color: var(--ink); padding: 0.1em 0.38em; border-radius: 5px; overflow-wrap: anywhere; }
+
+/* terminal code blocks */
+.code { position: relative; background: var(--term-bg); border-radius: 12px; border: 1px solid var(--term-line); margin-block: 0 1.4em; overflow: hidden; }
+.code-bar { display: flex; align-items: center; gap: 8px; padding: 9px 12px 9px 14px; border-bottom: 1px solid var(--term-line); }
+.code-bar i { width: 10px; height: 10px; border-radius: 50%; background: var(--term-line); display: block; }
+.code-bar .lang { margin-left: 6px; font-family: var(--f-mono); font-size: 0.72rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--term-dim); flex: 1; }
+.code-bar button { font-family: var(--f-mono); font-size: 0.72rem; color: var(--term-dim); background: transparent; border: 1px solid var(--term-line); border-radius: 6px; padding: 3px 9px; cursor: pointer; }
+.code-bar button:hover { color: var(--term-fg); border-color: var(--term-dim); }
+.code pre { margin: 0; padding: 16px 18px 18px; overflow-x: auto; }
+.code pre code { background: none; padding: 0; color: var(--term-fg); font-size: 0.82rem; line-height: 1.6; overflow-wrap: normal; white-space: pre; border-radius: 0; }
+.hljs-keyword, .hljs-built_in, .hljs-literal { color: var(--hl-key); }
+.hljs-string { color: var(--hl-str); }
+.hljs-number { color: var(--hl-num); }
+.hljs-comment { color: var(--hl-com); font-style: italic; }
+.hljs-title, .hljs-title.function_ { color: var(--hl-fn); }
+.hljs-meta { color: var(--hl-num); }
+.hljs-params { color: var(--term-fg); }
+
+/* tables */
+.table-wrap { overflow-x: auto; margin-block: 0 1.5em; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 0.9rem; line-height: 1.5; font-variant-numeric: tabular-nums; }
+th { text-align: left; font-family: var(--f-mono); font-size: 0.72rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); background: var(--bg); padding: 11px 14px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+td { padding: 11px 14px; border-bottom: 1px solid var(--line); vertical-align: top; min-width: 120px; }
+tr:last-child td { border-bottom: 0; }
+tbody tr:hover td { background: var(--accent-soft); }
+td code { font-size: 0.82em; }
+
+/* callouts */
+blockquote { margin-inline: 0; padding: 14px 18px; background: var(--signal-soft); border-radius: 12px; border: 1px solid color-mix(in srgb, var(--signal) 30%, transparent); }
+blockquote p { margin: 0; }
+blockquote strong:first-child { color: var(--signal); }
+
+/* scenarios */
+.scenario { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 22px 24px 18px; margin-block: 0 22px; }
+.scenario > * { margin-block: 0 0.9em; }
+.scenario-head { font-family: var(--f-display); font-size: 1.18rem; line-height: 1.3; }
+.scenario-head strong { font-weight: 700; }
+.options { list-style: none; padding: 0; display: grid; gap: 8px; }
+.options li { max-width: none; margin: 0; display: flex; gap: 12px; align-items: baseline; padding: 10px 14px; border: 1px solid var(--line); border-radius: 10px; cursor: pointer; transition: border-color .15s, background .15s; }
+.options li:hover { border-color: var(--accent); }
+.opt-key { flex: none; font-family: var(--f-mono); font-weight: 600; font-size: 0.85rem; color: var(--accent); }
+.options li.correct { border-color: var(--ok); background: var(--ok-soft); }
+.options li.correct .opt-key { color: var(--ok); }
+.options li.wrong { border-color: var(--bad); background: var(--bad-soft); }
+.options li.wrong .opt-key { color: var(--bad); }
+.answer summary { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-family: var(--f-mono); font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); padding: 6px 12px; border: 1px dashed var(--accent); border-radius: 8px; list-style: none; }
+.answer summary::-webkit-details-marker { display: none; }
+.answer[open] summary { display: none; }
+.answer p { margin: 0; padding: 12px 16px; background: var(--ok-soft); border-radius: 10px; max-width: none; }
+.answer p > strong:first-child { color: var(--ok); }
+
+/* ---------- colour + pill layer ---------- */
+.hero { position: relative; }
+.hero::before { content: ""; position: absolute; inset: 0 -10% 0 -10%; z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(40% 60% at 8% 30%, color-mix(in srgb, var(--c2) 16%, transparent), transparent 70%),
+    radial-gradient(35% 55% at 70% 20%, color-mix(in srgb, var(--c3) 14%, transparent), transparent 70%),
+    radial-gradient(30% 50% at 92% 80%, color-mix(in srgb, var(--c4) 12%, transparent), transparent 70%); }
+.hero h1 .rest { background: linear-gradient(100deg, var(--ink) 30%, var(--c2) 75%, var(--c4)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.hero h1 .eyebrow { border-radius: 999px; padding: 5px 14px; }
+.meta li { border-radius: 999px; padding: 7px 16px; }
+.meta li:nth-child(1) { background: color-mix(in srgb, var(--c1) 12%, var(--surface)); border-color: color-mix(in srgb, var(--c1) 35%, transparent); }
+.meta li:nth-child(2) { background: color-mix(in srgb, var(--c2) 12%, var(--surface)); border-color: color-mix(in srgb, var(--c2) 35%, transparent); }
+.meta li:nth-child(3) { background: color-mix(in srgb, var(--c3) 12%, var(--surface)); border-color: color-mix(in srgb, var(--c3) 35%, transparent); }
+.meta li:nth-child(1) strong { color: var(--c1); }
+.meta li:nth-child(2) strong { color: var(--c2); }
+.meta li:nth-child(3) strong { color: var(--c3); }
+
+.sec { --sec: var(--c1); --sec-soft: color-mix(in srgb, var(--sec) 13%, var(--surface)); }
+.sec > h2 { border-top: 0; padding-top: 0; position: relative; }
+.sec > h2::before { content: ""; display: block; height: 4px; width: 100%; border-radius: 999px; margin-bottom: 1.1em;
+  background: linear-gradient(90deg, var(--sec), color-mix(in srgb, var(--sec) 10%, transparent)); }
+.sec h2 .num { background: var(--sec); color: var(--surface); padding: 3px 12px; border-radius: 999px; font-size: 0.58em; vertical-align: 0.3em; margin-right: 0.5em; }
+.sec h3 .num { background: var(--sec-soft); color: var(--sec); padding: 2px 10px; border-radius: 999px; font-size: 0.7em; vertical-align: 0.12em; }
+.sec h4 { display: inline-block; background: var(--sec-soft); color: var(--sec); padding: 5px 14px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--sec) 30%, transparent); }
+.sec h4 code { background: transparent; border: 0; color: inherit; padding: 0; }
+.sec li::marker { color: var(--sec); }
+.sec .table-wrap { border-color: color-mix(in srgb, var(--sec) 28%, var(--line)); }
+.sec th { background: var(--sec-soft); color: var(--sec); }
+.sec tbody tr:nth-child(even) td { background: color-mix(in srgb, var(--sec) 4%, var(--surface)); }
+.sec tbody tr:hover td { background: var(--sec-soft); }
+
+/* numbered lists as pill counters */
+.sec ol { list-style: none; padding-left: 0; counter-reset: n; display: grid; gap: 10px; }
+.sec ol > li { counter-increment: n; position: relative; padding-left: 44px; margin: 0; }
+.sec ol > li::before { content: counter(n); position: absolute; left: 0; top: 0.12em; min-width: 30px; height: 26px; display: grid; place-items: center;
+  border-radius: 999px; background: var(--sec); color: var(--surface); font-family: var(--f-mono); font-size: 0.78rem; font-weight: 600; }
+
+/* inline code pills, colour-coded by meaning */
+article :not(pre) > code { border-radius: 999px; padding: 0.08em 0.6em; border: 1px solid var(--line); background: var(--surface);
+  -webkit-box-decoration-break: clone; box-decoration-break: clone; white-space: normal; }
+code.k-ok   { color: var(--c6); background: color-mix(in srgb, var(--c6) 12%, var(--surface)); border-color: color-mix(in srgb, var(--c6) 35%, transparent); }
+code.k-bad  { color: var(--c4); background: color-mix(in srgb, var(--c4) 11%, var(--surface)); border-color: color-mix(in srgb, var(--c4) 35%, transparent); }
+code.k-tool { color: var(--c1); background: color-mix(in srgb, var(--c1) 11%, var(--surface)); border-color: color-mix(in srgb, var(--c1) 35%, transparent); }
+code.k-cap  { color: var(--c5); background: color-mix(in srgb, var(--c5) 12%, var(--surface)); border-color: color-mix(in srgb, var(--c5) 35%, transparent); }
+code.k-msg  { color: var(--c2); background: color-mix(in srgb, var(--c2) 11%, var(--surface)); border-color: color-mix(in srgb, var(--c2) 35%, transparent); }
+code.k-fn   { color: var(--c3); background: color-mix(in srgb, var(--c3) 11%, var(--surface)); border-color: color-mix(in srgb, var(--c3) 35%, transparent); }
+.legend { display: flex; flex-wrap: wrap; gap: 8px; margin: 22px 0 0; padding: 0; list-style: none; }
+.legend li { font-family: var(--f-mono); font-size: 0.72rem; }
+.legend code { font-size: 0.72rem; }
+
+/* code bar language pill */
+.code-bar .lang { flex: 0 0 auto; padding: 2px 10px; border-radius: 999px; background: var(--term-line); }
+.code-bar .lang.python { color: var(--c2); }
+.code-bar .lang.bash { color: var(--c3); }
+.code-bar .spacer { flex: 1; }
+.code-bar button { border-radius: 999px; padding: 3px 12px; }
+.code-bar i:nth-child(1) { background: #E5626A; } .code-bar i:nth-child(2) { background: #E6B450; } .code-bar i:nth-child(3) { background: #5DBE7E; }
+
+/* TOC dots */
+.toc a { display: flex; gap: 10px; align-items: baseline; }
+.toc a .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--sec, var(--line)); transform: translateY(-1px); }
+.toc a.sub .dot { width: 5px; height: 5px; opacity: .7; }
+.toc a.active { background: color-mix(in srgb, var(--sec, var(--accent)) 12%, transparent); border-radius: 0 999px 999px 0; color: var(--sec, var(--accent)); border-left-color: var(--sec, var(--accent)); }
+
+/* scenarios & answers */
+.scenario { border-color: color-mix(in srgb, var(--sec) 30%, var(--line)); background:
+  linear-gradient(160deg, color-mix(in srgb, var(--sec) 7%, var(--surface)), var(--surface) 45%); }
+.scenario-head .pill { display: inline-block; font-family: var(--f-mono); font-size: 0.72rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+  background: var(--sec); color: var(--surface); padding: 4px 12px; border-radius: 999px; vertical-align: 0.2em; margin-right: 8px; }
+.options li { border-radius: 999px; padding: 10px 18px; }
+.opt-key { display: inline-grid; place-items: center; min-width: 30px; height: 24px; border-radius: 999px; background: color-mix(in srgb, var(--sec) 14%, var(--surface)); color: var(--sec); font-size: 0.78rem; }
+.options li.correct .opt-key { background: var(--ok); color: var(--surface); }
+.options li.wrong .opt-key { background: var(--bad); color: var(--surface); }
+.answer summary { border-radius: 999px; padding: 7px 16px; border-color: var(--sec); color: var(--sec); }
+.answer p { border-radius: 16px; }
+.answer p > strong:first-child { background: var(--ok); color: var(--surface); padding: 2px 10px; border-radius: 999px; }
+blockquote { border-radius: 18px; }
+blockquote strong:first-child { background: var(--signal); color: var(--surface); padding: 1px 10px; border-radius: 999px; }
+
+.ex-hint { font-family: var(--f-mono); font-size: 0.75rem; color: var(--muted); margin-top: -4px; }
+
+@media (max-width: 1000px) {
+  .shell { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .toc { position: static; max-height: none; border: 1px solid var(--line); border-radius: 12px; padding: 8px 14px; background: var(--surface); }
+  .hero { grid-template-columns: minmax(0, 1fr); padding-block: 36px 24px; }
+  .orbit { display: none; }
+}
+@media (max-width: 520px) {
+  body { font-size: 15.5px; }
+  .scenario { padding: 18px 16px 12px; }
+}
+</style>
+
+<div class="progress" aria-hidden="true"><span id="bar"></span></div>
+<header class="hero" id="hero">
+  <div id="hero-text"></div>
+  <div class="orbit" aria-hidden="true"><div class="dot"></div><div class="core"></div></div>
+</header>
+<div class="shell">
+  <nav class="toc" aria-label="Contents">
+    <details id="toc-details" open>
+      <summary>Contents</summary>
+      <ol id="toc"></ol>
+    </details>
+  </nav>
+  <article id="article"></article>
+</div>
+
+<script type="text/markdown" id="src"># POC 2: Auto, Any and a Forced Tool
+
+> **File:** `poc2_tool_choice.py` (with `extraction_setup.py` and `common.py`)
+> **Domain:** 04 Prompt Engineering & Structured Output → 03 Structured Output with Tool Use
+> **SDK:** Anthropic Python SDK, Messages API (`anthropic>=2.0`; 2.8.0 in the folder's `.venv`), model `claude-haiku-5-5`
+> **Page:** https://claude.ai/artifact/AZvPEjXkDisjN5DWvnsJBH
+
+---
+
+## 1. What this POC proves
+
+This POC sends the same 4 inbox documents (2 invoices, a receipt, a newsletter) to the Messages API three times, with the same three extraction tools. Only `tool_choice` changes: `auto`, `any`, then a forced `extract_metadata`. Each call is one response; no `tool_result` is ever sent back. Every claim below is checked against one real run: `logs/poc2_tool_choice_20261114_023531.log`.
+
+| # | Idea | Where it shows up in the code |
+|---|------|------------------------------|
+| 1 | **`tool_choice` decides whether a tool call is guaranteed.** `auto`: Claude may call a tool or reply in text. `any`: Claude must call a tool, and picks which. `tool`: Claude must call the named tool. | `MODES`, `send()` |
+| 2 | **The Agent SDK has no `tool_choice`,** so this POC uses the Messages API directly. Opus 5.5, Sonnet 5.5 and Fable 5.1 answer `any` and `tool` with a 400 error, so it runs on `claude-haiku-5-5`. | `FORCED_MODEL`, `anthropic.AsyncAnthropic()` |
+| 3 | **`strict: True` makes a guaranteed call schema-valid too.** `any` guarantees a call, not a valid input; `strict` constrains the input to the tool's schema. | `"strict": True` on every tool in `TOOLS` |
+| 4 | **Tool descriptions steer selection.** `extract_metadata` says it is "the mandatory first step for every inbox document". | `TOOLS` descriptions |
+| 5 | **Check, don't trust.** The script verifies every first tool call against its schema in plain Python, and reports which block came first. | `check_input()`; the per-call and summary lines in `main()` |
+| 6 | **The honest schemas from POC 1 are reused.** `INVOICE_SCHEMA` (nullable optional fields, `unclear`/`other`) is the input schema of `extract_invoice`. | `from extraction_setup import DOCUMENTS, INVOICE_SCHEMA` |
+
+The pattern in one line:
+
+```
+document + 3 tools + tool_choice ──messages.create()──▶ one response ──▶ tool_use block(s) or text ──▶ check_input(first call)
+```
+
+**What the real run showed, in one line:** all 12 responses called a tool, `auto` included. In every mode the first call was `extract_metadata`; under `any` and `forced`, Claude also called `extract_invoice` or `extract_receipt` in the same response, which the script's summary lines don't show. Section 5 has the details.
+
+---
+
+## 2. The files involved
+
+```
+03-Structured-Output-with-Tool-Use/
+├── .env                      ← ANTHROPIC_API_KEY (POC 2 reads only the key), MODEL_ID, MAX_TURNS, MAX_BUDGET_USD
+├── .env.example              ← the same keys, with placeholder values
+├── requirements.txt          ← claude-agent-sdk, python-dotenv, anthropic>=2.0 (for this script)
+├── common.py                 ← load_settings(), setup_logging(), log_model_io() (with a Messages API branch)
+├── extraction_setup.py       ← DOCUMENTS (5 invoices, a receipt, a newsletter), INVOICE_SCHEMA (shared with POC 1)
+├── poc1_schema_design.py     ← POC 1: naive vs nullable schema through the Agent SDK (not covered here)
+├── poc2_tool_choice.py       ← entry point: 3 modes × 4 documents = 12 Messages API calls
+├── README.md
+└── logs/
+    └── poc2_tool_choice_20261114_023531.log   ← the real run used in sections 3.2 and 5
+```
+
+Every snippet in this article is copied from these files, logging statements included. Each logging statement is named with the log line tag it writes, so you can find its output in the log file.
+
+`poc2_tool_choice.py` holds almost everything itself:
+- `common.py` covers **configuration and observability**: `load_settings()` puts the API key into the environment, and `log_model_io()` logs a Messages API response with the same tags POC 1 uses for SDK messages.
+- `extraction_setup.py` covers **shared test material**: the documents and `INVOICE_SCHEMA`.
+- `poc2_tool_choice.py` covers **capabilities and the experiment**: the receipt and metadata schemas, the three tools, the three `tool_choice` modes, `check_input()`, `send()` and the loop.
+
+---
+
+## 3. End-to-end execution flow
+
+### 3.1 The big picture
+
+```
+python poc2_tool_choice.py
+        │
+        ▼
+asyncio.run(main())                                                     [poc2_tool_choice.py]
+        │
+        ├─▶ load_settings()                                             [common.py]
+        │      └─ .env → os.environ (ANTHROPIC_API_KEY); the returned Settings is not used
+        ├─▶ setup_logging("poc2_tool_choice")                           [common.py]
+        │      └─ console + logs/poc2_tool_choice_<date>_<time>.log, lines "HH:MM:SS  message"
+        ├─▶ client = anthropic.AsyncAnthropic()                          reads ANTHROPIC_API_KEY
+        │
+        └─▶ for mode in RUNS:                      auto → any → forced
+               ├─ for doc_id in INBOX:            D1, D4, R1, N1
+               │     ├─ response = send(client, mode, doc_id)
+               │     │     ├─ log.info("MODEL INPUT   prompt ... (tool_choice=...)")      → log: prompt
+               │     │     ├─ client.messages.create(..., tools=TOOLS, tool_choice=MODES[mode])
+               │     │     └─ log_model_io(response)                                    → log: tool_use / text / stop_reason
+               │     ├─ APIError → log.error("<mode> <doc>: API error: ..."); continue
+               │     ├─ no tool_use block → text_only.append(doc_id); continue
+               │     ├─ found = check_input(tool_uses[0].input, SCHEMAS[tool_uses[0].name])
+               │     └─ log.info("%-6s %s: %s, first block %s, schema problems %s")      → log: "<mode> <doc>: ..."
+               └─ log.info("%-6s %d/%d called a tool ...")                              → log: "<mode> 4/4 called a tool ..."
+```
+
+There is no agent loop here. Each document is one request and one response, and this is what happens inside it; the right-hand column names the log line each step writes.
+
+```
+send(client, mode, doc_id)                                                            [poc2_tool_choice.py]
+   │
+   ├─ text = "New document in the accounts inbox:\n\n" + DOCUMENTS[doc_id]
+   ├─ log.info("MODEL INPUT   prompt ... (tool_choice=...)")                       → log: prompt
+   │
+   ├─▶ await client.messages.create(model=FORCED_MODEL, system=INBOX_SYSTEM, tools=TOOLS,
+   │                                tool_choice=MODES[mode], messages=[user: text])
+   │      ┌──────────────── API-owned: one model response ─────────────────────────────┐
+   │      │ auto   → Claude may think, then call 0, 1 or more tools, or answer in text  │
+   │      │ any    → the response must contain a tool call; Claude picks the tool       │
+   │      │ tool   → the response must call extract_metadata                            │
+   │      │ strict → each tool input is constrained to that tool's input_schema         │
+   │      │ returns Message(content=[thinking? text? tool_use...], stop_reason)         │
+   │      └────────────────────────────────────────────────────────────────────────────┘
+   │
+   └─ log_model_io(response)                     one line per block, then stop_reason  → log: tool_use / stop_reason
+   return response   (main() reads tool_use blocks; no tool is executed, no tool_result is sent)
+```
+
+### 3.2 One document across the three modes (D1, real output)
+
+The values below come from the real run on 2026-11-14, recorded in `logs/poc2_tool_choice_20261114_023531.log`. The log holds model input, model output and the POC's own check lines. Each log line comes from one statement in the code:
+
+| Log line tag | Source | Field logged | Written by |
+|--------------|--------|--------------|------------|
+| `MODEL INPUT   prompt` | *(none: the user message built in `send()`)* | `text` and `MODES[mode]` | `log.info("MODEL INPUT   prompt ... (tool_choice=%s)")` in `send()` |
+| `MODEL OUTPUT  thinking` | `response.content` → block with `type == "thinking"` | `block.thinking`, only when non-empty | `log_model_io()`, Messages API branch (`common.py`). None in this log |
+| `MODEL OUTPUT  text` | block with `type == "text"` | `block.text` | `log_model_io()`. None in this log |
+| `MODEL OUTPUT  tool_use` | block with `type == "tool_use"` | `block.name`, `block.input`, `block.id` | `log_model_io()`: one line per `tool_use` block |
+| `MODEL OUTPUT  stop_reason ... (Messages API)` | the response itself | `response.stop_reason` | `log_model_io()` |
+| `<mode> <doc>: <tool>, first block <type>, schema problems <...>` | *(none: Python checks)* | `tool_uses[0].name`, `response.content[0].type`, `check_input()` | `log.info(...)` in `main()` |
+| `<mode> N/4 called a tool [...]; text only: ...; schema problems: N` | *(none: Python counters)* | `called`, `text_only`, `problems` | `log.info(...)` in `main()` |
+| `<mode> <doc>: API error: ...` | *(none)* | the `anthropic.APIError` | `main()`. None in this log |
+| `HH:MM:SS` at the start of each line | *(none)* | the time the line was logged | the formatter in `setup_logging()` |
+
+D1 is plainly an invoice. The same request three times, only `tool_choice` different:
+
+```
+── auto ─────────────────────────────────────────────────────────────────────────
+02:35:31  (input)  prompt = New document in the accounts inbox:\n\nRIDGEWAY SHELVING CO. ... Total due: $1,987.20
+                   tool_choice = {'type': 'auto'}                                      log: prompt
+02:35:40  response.content[0]  type = "thinking"   (block.thinking empty → no log line)
+          response.content[1]  tool_use                                                 log: tool_use
+            name  = "extract_metadata"
+            input = {'document_type': 'invoice', 'sender': 'Ridgeway Shelving Co.'}
+            id    = "toolu_01V2GxsUDbK2jzoyA5MxsnYo"
+          response.stop_reason = "tool_use"                                             log: stop_reason
+02:35:40  (check)  auto   D1: extract_metadata, first block thinking, schema problems none
+
+── any ──────────────────────────────────────────────────────────────────────────
+02:35:48  (input)  tool_choice = {'type': 'any'}
+02:35:56  response.content[0]  tool_use                                                 log: tool_use
+            name  = "extract_metadata"
+            input = {'document_type': 'invoice', 'sender': 'RIDGEWAY SHELVING CO.'}
+            id    = "toolu_01L1ApmJ4sVbd2s2ktBPRkcS"
+          response.content[1]  tool_use                                                 log: tool_use
+            name  = "extract_invoice"                                                   ← a second call, same response
+            input = {'vendor_name': 'RIDGEWAY SHELVING CO.', 'total_amount': 1987.2,
+                     'category': 'equipment', 'invoice_date': '2026-09-14', 'tax_amount': 147.2}
+            id    = "toolu_01MPWpTZq45csGPR75FbtiWX"
+          response.stop_reason = "tool_use"
+02:35:56  (check)  any    D1: extract_metadata, first block tool_use, schema problems none
+
+── forced: {'type': 'tool', 'name': 'extract_metadata'} ─────────────────────────
+02:36:03  (input)  tool_choice = {'type': 'tool', 'name': 'extract_metadata'}
+02:36:04  response.content[0]  tool_use  extract_metadata {'document_type': 'invoice',
+                                         'sender': 'RIDGEWAY SHELVING CO.'}  (id=toolu_01NVGLrtckmYgNgLEiVkPpsu)
+          response.content[1]  tool_use  extract_invoice {'vendor_name': 'RIDGEWAY SHELVING CO.',
+                                         'total_amount': 1987.2, 'category': 'equipment',
+                                         'invoice_date': '2026-09-14', 'tax_amount': 147.2}
+                                         (id=toolu_01GfVLECHBQHZBrhqAa1M15a)
+          response.stop_reason = "tool_use"
+02:36:04  (check)  forced D1: extract_metadata, first block tool_use, schema problems none
+```
+
+What to notice in the real data:
+- **`auto` didn't reply in text here.** Claude called `extract_metadata` for D1, and for every other document too. The description says it's "the mandatory first step for every inbox document", and Claude followed it.
+- **`auto` thinks first; `any` and `forced` don't.** Under `auto` the first block was a `thinking` block on all 4 documents; under `any` and `forced` it was `tool_use` on all 8. The `first block ...` part of each check line comes from `response.content[0].type`. The thinking text itself was empty, so `log_model_io()` (which logs only non-empty thinking) wrote no `thinking` line.
+- **Two tool calls in one response.** Under `any` and `forced`, D1 got `extract_metadata` *and* `extract_invoice`. `log_model_io()` logs every `tool_use` block, so both appear; `main()` looks only at `tool_uses[0]`, so its check line names only `extract_metadata`.
+- **Forcing a tool doesn't make it the only one.** `forced` guaranteed `extract_metadata` as the first call, and Claude still added `extract_invoice`, the tool that fits better, right after it.
+- **`stop_reason = "tool_use"` every time.** With a tool call in the response, the API stops and waits for a `tool_result`. This script never sends one, so each document ends there.
+- **Sender casing differs between modes:** `Ridgeway Shelving Co.` under `auto`, `RIDGEWAY SHELVING CO.` under `any` and `forced`. `METADATA_SCHEMA` gives `sender` no description, so nothing asks for one form.
+- **Not shown:** the model name, token usage and the response `id` are on the response object, but `log_model_io()` doesn't log them. Tool results don't exist in this POC, so there is no `tool_result` line.
+
+---
+
+## 4. Code walkthrough
+
+The snippets follow the order in which the code runs. Each one ends with the log lines it writes, copied from the real log (long values trimmed with `...`).
+
+### 4.1 Module docstring: why the Messages API
+
+```python
+"""
+POC 2 - auto, any and a forced tool (Messages API)
+==================================================
+The Agent SDK has no tool_choice: every SDK tool call is effectively "auto". So this script calls the Messages API
+directly, with three extraction tools and 4 inbox documents (2 invoices, a receipt, a newsletter):
+
+    auto     Claude MAY call a tool, or reply in text: no guaranteed structured output
+    any      Claude MUST call a tool, but picks which one: right when the document type is unknown
+    forced   Claude MUST call extract_metadata: a mandatory first step, even when another tool fits better
+
+strict: True on every tool makes a guaranteed call schema-valid too. Each call is one response: no tool_result is
+sent back.
+
+Besides model I/O, the log shows one line per call (tool chosen, schema problems) and one summary line per mode.
+
+Run:  python poc2_tool_choice.py     (3 runs, 4 API calls each)
+"""
+```
+
+**Why it matters:**
+- **Why not the Agent SDK:** `ClaudeAgentOptions` has no `tool_choice`, so every SDK tool call is effectively `auto`. To see the three modes side by side, the script talks to the API directly. (POC 1's guarantee in the SDK is `output_format`.)
+- **The three modes in one table:** MAY / MUST, any tool / MUST, this tool. That's the exam distinction.
+- **"Each call is one response":** no agent loop, no tool execution. The test is only *what Claude asks to call*.
+
+---
+
+### 4.2 Imports and constants
+
+```python
+import asyncio
+import sys
+
+import anthropic
+
+from common import load_settings, log, log_model_io, setup_logging
+from extraction_setup import DOCUMENTS, INVOICE_SCHEMA
+
+FORCED_MODEL = "claude-haiku-5-5"  # accepts any/tool; Opus 5.5, Sonnet 5.5 and Fable 5.1 answer them with a 400 (E1)
+MAX_TOKENS = 2048
+INBOX = ["D1", "D4", "R1", "N1"]
+INBOX_SYSTEM = "You are the inbox assistant of the Fernway Outfitters accounts-payable team."
+```
+
+| Name | Value | Why |
+|------|-------|-----|
+| `anthropic` | the Anthropic Python SDK | Direct Messages API access, where `tool_choice` exists |
+| `DOCUMENTS`, `INVOICE_SCHEMA` | from `extraction_setup.py` | Same documents and honest invoice schema as POC 1 |
+| `FORCED_MODEL` | `claude-haiku-5-5` | Accepts `any` and `tool`; the code comment says the 5.5 Opus/Sonnet and Fable 5.1 models return a 400 for them |
+| `MAX_TOKENS` | `2048` | Enough for thinking plus one or two tool calls |
+| `INBOX` | `D1`, `D4`, `R1`, `N1` | A complete invoice, a statement with missing fields, a receipt, a newsletter: one per kind of decision |
+| `INBOX_SYSTEM` | a one-line role | Deliberately says nothing about which tool to use; the descriptions do that |
+
+**Agentic concept:** model capabilities differ. A feature you rely on (here, forced tool use) must be checked against the model you deploy. `MODEL_ID` from `.env` is ignored by this script on purpose.
+
+---
+
+### 4.3 The three schemas and the three tools
+
+```python
+RECEIPT_SCHEMA = {"type": "object", "additionalProperties": False,
+                  "properties": {"merchant": {"type": "string"}, "total_amount": {"type": "number"},
+                                 "payment_method": {"type": "string", "enum": ["card", "cash", "unclear", "other"]},
+                                 "purchase_date": {"type": ["string", "null"]}},
+                  "required": ["merchant", "total_amount", "payment_method"]}
+METADATA_SCHEMA = {"type": "object", "additionalProperties": False,
+                   "properties": {"document_type": {"type": "string", "enum": ["invoice", "receipt", "unclear", "other"]},
+                                  "document_type_detail": {"type": ["string", "null"]},
+                                  "sender": {"type": ["string", "null"]}},
+                   "required": ["document_type"]}
+TOOLS = [  # strict: True on every tool: the input must match its schema (E2)
+    {"name": "extract_invoice", "strict": True, "input_schema": INVOICE_SCHEMA,
+     "description": "Records a supplier invoice: a bill Fernway Outfitters must pay. Use it for invoices and "
+                    "statements that ask for payment."},
+    {"name": "extract_receipt", "strict": True, "input_schema": RECEIPT_SCHEMA,
+     "description": "Records a receipt for a purchase that was already paid at the point of sale."},
+    {"name": "extract_metadata", "strict": True, "input_schema": METADATA_SCHEMA,
+     "description": "Records a document's type and sender: the mandatory first step for every inbox document, before "
+                    "any type-specific extraction."},
+]
+SCHEMAS = {t["name"]: t["input_schema"] for t in TOOLS}
+```
+
+| Tool | When its description says to use it | Schema highlights |
+|------|--------------------------------------|-------------------|
+| `extract_invoice` | invoices and statements that ask for payment | POC 1's honest schema: 3 required, nullable optional fields, `unclear`/`other` |
+| `extract_receipt` | purchases already paid at the point of sale | `payment_method` enum with `unclear`/`other`; nullable `purchase_date` |
+| `extract_metadata` | **every** inbox document, **first**, before any type-specific extraction | only `document_type` required; `other` + `document_type_detail` |
+
+**Why it matters:**
+- **The description is the prompt.** Nothing in `INBOX_SYSTEM` or the user message says which tool to call. Claude picks from the descriptions, and `extract_metadata`'s "mandatory first step" wording shaped every response in the log.
+- **`strict: True` on every tool.** Under `any`, Claude must call a tool, but without `strict` the input could still miss a required key or break an enum. `strict` constrains the input to the schema, which needs `additionalProperties: False` on every object (hence that key in all three schemas and in `INVOICE_SCHEMA`).
+- **Honest escape values everywhere:** `unclear` and `other` in both enums, `null` for optional fields. A newsletter can be `document_type: "other"` with a detail instead of being forced into `invoice` or `receipt`.
+- **`SCHEMAS`** maps a tool name back to its schema, so `check_input()` can verify whichever tool Claude chose.
+
+**Anti-pattern avoided:** a newsletter has no matching extraction tool. Without `extract_metadata` and its `other` value, `any` would force Claude to file it as an invoice or a receipt.
+
+---
+
+### 4.4 The modes
+
+```python
+MODES = {"auto": {"type": "auto"}, "any": {"type": "any"}, "forced": {"type": "tool", "name": "extract_metadata"}}
+
+RUNS = ["auto", "any", "forced"]
+```
+
+| Mode | `tool_choice` | Guarantee | Use it when |
+|------|---------------|-----------|-------------|
+| `auto` | `{"type": "auto"}` | none: a tool call or a text reply | a conversation where text is a valid answer |
+| `any` | `{"type": "any"}` | at least one tool call; Claude picks the tool | you need structured output and the document type is unknown |
+| `forced` | `{"type": "tool", "name": "extract_metadata"}` | that tool is called | a mandatory step must run (metadata before enrichment) |
+
+---
+
+### 4.5 `check_input()`: a schema check you can read
+
+```python
+def check_input(data: dict, schema: dict) -> list[str]:
+    """Problems of a tool input against its schema: a missing or unknown key, a wrong type, a value outside an enum."""
+    types = {"string": str, "number": (int, float), "null": type(None)}
+    problems = [f"missing {k}" for k in schema["required"] if k not in data]
+    problems += [f"unknown {k}" for k in data if k not in schema["properties"]]
+    for key, value in data.items():
+        spec = schema["properties"].get(key, {})
+        allowed = spec.get("type", [])
+        allowed = allowed if isinstance(allowed, list) else [allowed]
+        if allowed and not isinstance(value, tuple(types[t] for t in allowed)):
+            problems.append(f"{key}: {type(value).__name__} is not {allowed}")
+        if "enum" in spec and value not in spec["enum"]:
+            problems.append(f"{key}: {value!r} is not in the enum")
+    return problems
+```
+
+**Why it matters:**
+- **Four checks, flat schemas only:** a required key is missing, a key is unknown (`additionalProperties: False`), a value has the wrong type (`null` allowed only where the type list has it), or a value is outside its `enum`.
+- **An empty list means valid.** `main()` adds `len(found)` to `problems` and logs `schema problems none` when the list is empty.
+- **Independent of `strict`.** The point is to verify the guarantee, not assume it. All 12 checked calls had no problems.
+- **Limit to know:** it doesn't check that optional fields are *present*. A present-but-omitted invoice number passes (section 5.2).
+
+---
+
+### 4.6 `send()`: one request, one response
+
+```python
+async def send(client: anthropic.AsyncAnthropic, mode: str, doc_id: str):
+    """One Messages API call: the same tools and document every time; only tool_choice changes."""
+    text = f"New document in the accounts inbox:\n\n{DOCUMENTS[doc_id]}"
+    log.info("MODEL INPUT   prompt       %s  (tool_choice=%s)", text, MODES[mode])
+    response = await client.messages.create(
+        model=FORCED_MODEL, max_tokens=MAX_TOKENS, system=INBOX_SYSTEM, tools=TOOLS, tool_choice=MODES[mode],
+        messages=[{"role": "user", "content": text}])
+    log_model_io(response)
+    return response
+```
+
+**Why it matters:**
+- **Everything is fixed except `tool_choice=MODES[mode]`:** model, system prompt, tools, document, `max_tokens`.
+- **The user message doesn't say "extract".** "New document in the accounts inbox" leaves room for a conversational reply under `auto`, which is the failure mode the POC wants to expose.
+- **A single-turn `messages` list.** Each call starts fresh; no earlier document is in the context.
+- **The prompt log line carries the mode,** so each block of the log names its `tool_choice`.
+
+Log line it wrote:
+
+```
+02:35:46  MODEL INPUT   prompt       New document in the accounts inbox:
+
+Kestrel Supply newsletter: our autumn catalogue is out! New insulated jackets, and 20% off tents until 31 October. Visit kestrelsupply.example to browse.  (tool_choice={'type': 'auto'})
+```
+
+---
+
+### 4.7 `main()`: three modes, four documents, three counters
+
+#### a) Setup
+
+```python
+async def main() -> int:
+    try:
+        load_settings()  # puts ANTHROPIC_API_KEY from .env into the environment, where the client reads it
+        setup_logging("poc2_tool_choice")
+    except (OSError, RuntimeError) as exc:
+        print(f"Setup failed: {exc}")
+        return 1
+
+    client = anthropic.AsyncAnthropic()
+```
+
+`load_settings()` is called only for its side effect: `load_dotenv()` puts the key into `os.environ`, and `AsyncAnthropic()` reads `ANTHROPIC_API_KEY` from there. The returned `Settings` (model, turns, budget) isn't used: this script has no agent loop to cap.
+
+#### b) The loop and its checks
+
+```python
+    for mode in RUNS:
+        called, text_only, problems = [], [], 0
+        for doc_id in INBOX:
+            try:
+                response = await send(client, mode, doc_id)
+            except anthropic.APIError as exc:  # e.g. a 400 if FORCED_MODEL doesn't support forced tool use
+                log.error("%s %s: API error: %s", mode, doc_id, exc)
+                continue
+            tool_uses = [b for b in response.content if b.type == "tool_use"]
+            if not tool_uses:  # auto allowed a conversational reply: nothing to store (C7)
+                text_only.append(doc_id)
+                continue
+            found = check_input(tool_uses[0].input, SCHEMAS[tool_uses[0].name])
+            problems += len(found)
+            called.append(f"{doc_id}->{tool_uses[0].name}")
+            log.info("%-6s %s: %s, first block %s, schema problems %s", mode, doc_id, tool_uses[0].name,
+                     response.content[0].type, found or "none")
+        log.info("%-6s %d/%d called a tool %s; text only: %s; schema problems: %d", mode, len(called), len(INBOX),
+                 called, text_only or "none", problems)
+    return 0
+```
+
+**Why it matters:**
+- **An API error doesn't stop the run.** If the model rejects a mode (the 400 the comment mentions), the document is logged and skipped. None in this log.
+- **"Text only" is the `auto` failure.** A response without a `tool_use` block gives the pipeline nothing to store. The code counts it instead of crashing.
+- **`response.content[0].type`** shows whether the API put the tool call first. Under `any` and `tool`, the call came first; under `auto`, thinking came first.
+- **Only the first tool call is checked and reported.** `tool_uses[0]` is what `check_input()`, `called` and the per-call line see. Any further `tool_use` blocks in the same response are logged by `log_model_io()` but not checked or counted. In the real run, that hid 6 of the 18 tool calls (section 5).
+
+Log lines it wrote (`any` mode):
+
+```
+02:35:56  any    D1: extract_metadata, first block tool_use, schema problems none
+02:36:03  any    4/4 called a tool ['D1->extract_metadata', 'D4->extract_metadata', 'R1->extract_metadata', 'N1->extract_metadata']; text only: none; schema problems: 0
+```
+
+---
+
+### 4.8 `__main__`
+
+```python
+if __name__ == "__main__":
+    sys.exit(asyncio.run(main()))
+```
+
+`asyncio.run()` runs the async `main()` (the client is `AsyncAnthropic`, so every call is awaited); `sys.exit()` passes `0` or `1` to the shell.
+
+---
+
+### 4.9 `log_model_io()` for a Messages API response (from `common.py`)
+
+```python
+def log_model_io(message: Any) -> None:
+    """Log the model input or output carried by one message from the query() stream, or by one Messages API
+    response."""
+    if isinstance(message, AssistantMessage):  # Claude's response = model OUTPUT
+        ...
+    elif getattr(message, "type", None) == "message":  # a Messages API response (POC 2): no SDK loop around it
+        for block in message.content:
+            if block.type == "thinking" and block.thinking:
+                log.info("MODEL OUTPUT  thinking     %s", block.thinking)
+            elif block.type == "text":
+                log.info("MODEL OUTPUT  text         %s", block.text)
+            elif block.type == "tool_use":
+                log.info("MODEL OUTPUT  tool_use     %s %s  (id=%s)", block.name, block.input, block.id)
+        log.info("MODEL OUTPUT  stop_reason  %s  (Messages API)", message.stop_reason)
+```
+
+**Why it matters:**
+- **Same tags as the SDK branches,** so POC 1's and POC 2's logs read the same way. The `(Messages API)` suffix replaces `(loop result: ...)`, because there is no loop and no `subtype`.
+- **Every `tool_use` block gets its own line.** That's why the log shows the second calls that `main()` doesn't report.
+- **Thinking only when non-empty.** The `auto` responses started with a `thinking` block (per the check lines) whose text was empty, so no `thinking` line appears.
+
+---
+
+### 4.10 `load_settings()` and `setup_logging()` (from `common.py`)
+
+```python
+def load_settings() -> Settings:
+    """Read .env. The SDK's Claude Code process takes ANTHROPIC_API_KEY from the environment."""
+    env_file = POC_DIR / ".env"
+    if not env_file.is_file():
+        raise RuntimeError(f"{env_file} not found: copy .env.example to .env and add your API key")
+    load_dotenv(env_file, override=True)  # .env wins over variables already set in your shell
+    if os.getenv("ANTHROPIC_API_KEY", "") in ("", "your-api-key-here"):
+        raise RuntimeError(f"set ANTHROPIC_API_KEY in {env_file}")
+    ...
+
+
+def setup_logging(script_name: str) -> None:
+    """Log to the console and to logs/<script>_<time>.log, so a paid run can be re-read later."""
+    log_dir = POC_DIR / "logs"
+    log_dir.mkdir(exist_ok=True)
+    log_file = log_dir / f"{script_name}_{datetime.now():%Y%m%d_%H%M%S}.log"
+    ...
+```
+
+**Why it matters:** the key never appears in code; `load_dotenv(..., override=True)` makes `.env` win over the shell. The log file name `poc2_tool_choice_20261114_023531.log` is the start time, 02:35:31, the time of the first log line.
+
+---
+
+### 4.11 The documents (from `extraction_setup.py`)
+
+```python
+INVOICES = {
+    "D1": ("RIDGEWAY SHELVING CO.\nInvoice RS-20417\nDate: 2026-09-14\nBill to: Fernway Outfitters\n"
+           "4 x steel warehouse shelving unit @ $460.00 = $1,840.00\nSales tax (8%): $147.20\nTotal due: $1,987.20"),
+    ...
+    "D4": ("Marta's Taxi Service\nMonthly statement for the Fernway Outfitters sales team\n"
+           "14 rides between your Bend store and the airport\nFares: $351.36\nGST: $35.14\nPlease pay: $386.50\n"
+           "Thank you!"),  # no invoice number, no date
+    ...
+}
+RECEIPTS = {"R1": ("TRAILSIDE CAFE\n2026-10-12 08:41\n2 x flat white $4.50\n1 x breakfast burrito $9.75\n"
+                   "Total $18.75\nPaid: Visa ****4417")}
+OTHER = {"N1": ("Kestrel Supply newsletter: our autumn catalogue is out! New insulated jackets, and 20% off tents "
+                "until 31 October. Visit kestrelsupply.example to browse.")}
+DOCUMENTS = {**INVOICES, **RECEIPTS, **OTHER}
+```
+
+| Id | Kind | Best-fitting tool | Why it's in the inbox |
+|----|------|-------------------|-----------------------|
+| D1 | complete invoice | `extract_invoice` | Under `forced`, it shows the named tool winning over the obvious one |
+| D4 | statement, no number, no date | `extract_invoice` ("statements that ask for payment") | Tests the description's edge and the nullable fields |
+| R1 | paid receipt | `extract_receipt` | A second type-specific tool to choose |
+| N1 | newsletter | none of the type-specific tools | Under `auto`, the expected text reply; under `any`, the test of `other` |
+
+---
+
+## 5. Turn-by-turn trace of each run (real output)
+
+Each run is 4 Messages API calls, one response each. Times are from `logs/poc2_tool_choice_20261114_023531.log`.
+
+### 5.1 Run 1: `auto`
+
+```
+02:35:40  MODEL OUTPUT  tool_use     extract_metadata {'document_type': 'invoice', 'sender': 'Ridgeway Shelving Co.'}  (id=toolu_01V2GxsUDbK2jzoyA5MxsnYo)
+02:35:40  MODEL OUTPUT  stop_reason  tool_use  (Messages API)
+02:35:40  auto   D1: extract_metadata, first block thinking, schema problems none
+02:35:44  MODEL OUTPUT  tool_use     extract_metadata {'document_type': 'invoice', 'document_type_detail': 'Monthly statement requesting payment for 14 taxi rides', 'sender': "Marta's Taxi Service"}  (id=toolu_01SAPJvdR9tnxd198Z1MBM4d)
+02:35:44  auto   D4: extract_metadata, first block thinking, schema problems none
+02:35:46  MODEL OUTPUT  tool_use     extract_metadata {'document_type': 'receipt', 'sender': 'TRAILSIDE CAFE'}  (id=toolu_01LSaAqBcF7GcvCW29XTjvgu)
+02:35:46  auto   R1: extract_metadata, first block thinking, schema problems none
+02:35:48  MODEL OUTPUT  tool_use     extract_metadata {'document_type': 'other', 'document_type_detail': 'Marketing newsletter (autumn catalogue announcement with promotional offer). No payment requested.', 'sender': 'Kestrel Supply'}  (id=toolu_01UtrYbnYm9xCBBC9RVaiiKs)
+02:35:48  MODEL OUTPUT  stop_reason  tool_use  (Messages API)
+02:35:48  auto   N1: extract_metadata, first block thinking, schema problems none
+02:35:48  auto   4/4 called a tool ['D1->extract_metadata', 'D4->extract_metadata', 'R1->extract_metadata', 'N1->extract_metadata']; text only: none; schema problems: 0
+```
+
+| Document | `tool_use` blocks (all logged) | `content[0].type` | `stop_reason` | `check_input()` |
+|----------|-------------------------------|-------------------|---------------|-----------------|
+| D1 | `extract_metadata` (invoice) | `thinking` | `tool_use` | `[]` |
+| D4 | `extract_metadata` (invoice, detail "Monthly statement ...") | `thinking` | `tool_use` | `[]` |
+| R1 | `extract_metadata` (receipt) | `thinking` | `tool_use` | `[]` |
+| N1 | `extract_metadata` (other, "Marketing newsletter ... No payment requested.") | `thinking` | `tool_use` | `[]` |
+
+| Variable (code) | Value |
+|-----------------|-------|
+| `called` | `['D1->extract_metadata', 'D4->extract_metadata', 'R1->extract_metadata', 'N1->extract_metadata']` |
+| `text_only` | `[]` → logged as `none` |
+| `problems` | `0` |
+| `anthropic.APIError` | not raised |
+| Wall time | 02:35:31 → 02:35:48, about 17 s (D1 alone 9 s) |
+
+Lessons from the real data:
+- **No text reply this time.** The curriculum expects `auto` to answer at least one document (typically N1) in text. In this run all 4 got a tool call. `auto` *allows* a text reply; it didn't *produce* one here, most likely because `extract_metadata` describes itself as mandatory for every document. One clean run doesn't make `auto` a guarantee: nothing in the request requires a call.
+- **One call per response, and it was the first step only.** Under `auto`, Claude called `extract_metadata` and stopped (`stop_reason` `tool_use`), apparently waiting for its result before any type-specific extraction, as the description says ("before any type-specific extraction"). The pipeline got metadata, but no invoice or receipt fields.
+- **The metadata was right.** D1 and D4 `invoice`, R1 `receipt`, N1 `other` with a detail that says why.
+
+### 5.2 Run 2: `any`
+
+```
+02:35:56  MODEL OUTPUT  tool_use     extract_metadata {'document_type': 'invoice', 'sender': 'RIDGEWAY SHELVING CO.'}  (id=toolu_01L1ApmJ4sVbd2s2ktBPRkcS)
+02:35:56  MODEL OUTPUT  tool_use     extract_invoice {'vendor_name': 'RIDGEWAY SHELVING CO.', 'total_amount': 1987.2, 'category': 'equipment', 'invoice_date': '2026-09-14', 'tax_amount': 147.2}  (id=toolu_01MPWpTZq45csGPR75FbtiWX)
+02:35:56  any    D1: extract_metadata, first block tool_use, schema problems none
+02:35:59  MODEL OUTPUT  tool_use     extract_metadata {'document_type': 'invoice', 'document_type_detail': 'Monthly statement requesting payment for 14 taxi rides between Bend store and airport', 'sender': "Marta's Taxi Service"}  (id=toolu_01L9VvpyLgjxiU6U1EbzWiBx)
+02:35:59  MODEL OUTPUT  tool_use     extract_invoice {'vendor_name': "Marta's Taxi Service", 'total_amount': 386.5, 'category': 'travel', 'tax_amount': 35.14}  (id=toolu_01G4cRvh8dGe2vJKj3tcVMao)
+02:35:59  any    D4: extract_metadata, first block tool_use, schema problems none
+02:36:01  MODEL OUTPUT  tool_use     extract_metadata {'document_type': 'receipt', 'document_type_detail': 'Point-of-sale receipt from Trailside Cafe, already paid by Visa ****4417', 'sender': 'TRAILSIDE CAFE'}  (id=toolu_01SM4PSnhPvjqoXBzTK5tmto)
+02:36:01  MODEL OUTPUT  tool_use     extract_receipt {'merchant': 'TRAILSIDE CAFE', 'total_amount': 18.75, 'payment_method': 'card', 'purchase_date': '2026-10-12'}  (id=toolu_016ojo87eVsTXzve5sZUoJEQ)
+02:36:01  any    R1: extract_metadata, first block tool_use, schema problems none
+02:36:03  MODEL OUTPUT  tool_use     extract_metadata {'document_type': 'other', 'document_type_detail': 'Marketing newsletter from Kestrel Supply promoting an autumn catalogue and a 20% tent discount until 31 October. No payment request.', 'sender': 'Kestrel Supply'}  (id=toolu_01J3HNSTub9XgvbKfq2Kbbna)
+02:36:03  any    N1: extract_metadata, first block tool_use, schema problems none
+02:36:03  any    4/4 called a tool ['D1->extract_metadata', 'D4->extract_metadata', 'R1->extract_metadata', 'N1->extract_metadata']; text only: none; schema problems: 0
+```
+
+| Document | 1st `tool_use` (checked) | 2nd `tool_use` (logged, not checked by the code) | `content[0].type` |
+|----------|--------------------------|--------------------------------------------------|-------------------|
+| D1 | `extract_metadata` invoice | `extract_invoice`: vendor, 1987.2, `equipment`, 2026-09-14, tax 147.2 | `tool_use` |
+| D4 | `extract_metadata` invoice | `extract_invoice`: vendor, 386.5, `travel`, tax 35.14 (no number, no date) | `tool_use` |
+| R1 | `extract_metadata` receipt | `extract_receipt`: `TRAILSIDE CAFE`, 18.75, `card`, 2026-10-12 | `tool_use` |
+| N1 | `extract_metadata` other | none | `tool_use` |
+
+| Variable (code) | Value |
+|-----------------|-------|
+| `called` | 4 × `->extract_metadata` (only `tool_uses[0]`) |
+| `text_only` / `problems` | `none` / `0` |
+| `response.stop_reason` | `tool_use` × 4 |
+| Wall time | 02:35:48 → 02:36:03, about 15 s (D1 alone 8 s) |
+
+Lessons from the real data:
+- **`any` guaranteed a tool call: 4 of 4, the call first, no text before it.** That's the curriculum's acceptance for `any`: `stop_reason` `tool_use`, first block `tool_use`, no text-only responses, valid input.
+- **The type-specific extraction happened, in the same response.** D1 and D4 got `extract_invoice`, R1 got `extract_receipt`, N1 got only metadata (no tool fits a newsletter). That's exactly the routing the curriculum expects from `any`, but as a *second* call after `extract_metadata`, not instead of it. The summary line reads `D1->extract_metadata` for all four, so you only see the routing in the `tool_use` lines.
+- **The second calls are valid.** Checked by hand against the schemas (the code doesn't): every key is known, every required key is present, `equipment`, `travel` and `card` are in their enums, the numbers are numbers.
+- **Optional fields can be dropped even when present.** D1's `extract_invoice` has no `invoice_number`, though the document prints `RS-20417`. Optional means *may be omitted*, and `check_input()` doesn't flag a missing optional key. D4's call also omits `invoice_number` and `invoice_date`, which *is* right: the statement has neither. Omission is valid for both, so absence of a key doesn't tell you which case you're in.
+
+### 5.3 Run 3: `forced` (`extract_metadata`)
+
+```
+02:36:04  MODEL OUTPUT  tool_use     extract_metadata {'document_type': 'invoice', 'sender': 'RIDGEWAY SHELVING CO.'}  (id=toolu_01NVGLrtckmYgNgLEiVkPpsu)
+02:36:04  MODEL OUTPUT  tool_use     extract_invoice {'vendor_name': 'RIDGEWAY SHELVING CO.', 'total_amount': 1987.2, 'category': 'equipment', 'invoice_date': '2026-09-14', 'tax_amount': 147.2}  (id=toolu_01GfVLECHBQHZBrhqAa1M15a)
+02:36:04  forced D1: extract_metadata, first block tool_use, schema problems none
+02:36:06  MODEL OUTPUT  tool_use     extract_metadata {'document_type': 'invoice', 'document_type_detail': 'Monthly statement requesting payment for 14 taxi rides between Bend store and airport', 'sender': "Marta's Taxi Service"}  (id=toolu_01BUBQdXCccfCbVvshKNZ4tR)
+02:36:06  MODEL OUTPUT  tool_use     extract_invoice {'vendor_name': "Marta's Taxi Service", 'total_amount': 386.5, 'category': 'travel', 'tax_amount': 35.14}  (id=toolu_011UiAHrPKtftjSFitwkeV9R)
+02:36:08  MODEL OUTPUT  tool_use     extract_metadata {'document_type': 'receipt', 'document_type_detail': 'Point-of-sale receipt from Trailside Cafe, already paid by Visa ****4417', 'sender': 'TRAILSIDE CAFE'}  (id=toolu_01XFcYMgY3RjXtMQAw2u3NP5)
+02:36:08  MODEL OUTPUT  tool_use     extract_receipt {'merchant': 'TRAILSIDE CAFE', 'total_amount': 18.75, 'payment_method': 'card', 'purchase_date': '2026-10-12'}  (id=toolu_0161HVhqYLuUMjcjfEA3RtEt)
+02:36:10  MODEL OUTPUT  tool_use     extract_metadata {'document_type': 'other', 'document_type_detail': 'Marketing newsletter from Kestrel Supply promoting an autumn catalogue and a tent discount; no payment requested.', 'sender': 'Kestrel Supply'}  (id=toolu_01XDNWve1JedBEJWrvAvRoYK)
+02:36:10  forced 4/4 called a tool ['D1->extract_metadata', 'D4->extract_metadata', 'R1->extract_metadata', 'N1->extract_metadata']; text only: none; schema problems: 0
+```
+
+| Variable (code) | Value |
+|-----------------|-------|
+| `MODES["forced"]` | `{'type': 'tool', 'name': 'extract_metadata'}` |
+| First `tool_use` | `extract_metadata` × 4, `content[0].type` `tool_use` × 4 |
+| Second `tool_use` | D1, D4 `extract_invoice`; R1 `extract_receipt`; N1 none (same pattern and same values as `any`) |
+| `text_only` / `problems` | `none` / `0` |
+| Wall time | 02:36:03 → 02:36:10, about 7 s (D1 1 s) |
+
+Lessons from the real data:
+- **The forced tool ran every time, first.** D1 (plainly an invoice) and R1 (plainly a receipt) both got `extract_metadata` first. The mandatory step can't be skipped.
+- **Forced is not exclusive.** After the forced call, Claude added the better-fitting tool in the same response, as under `any`. "The model has no flexibility in tool selection" holds for the *first* call; it didn't stop a second one. If a step must be the *only* call, the request has to say so too (the Messages API's `disable_parallel_tool_use` option in `tool_choice`; not used in this POC).
+- **`forced` and `any` produced the same tool sequence here.** Because `extract_metadata` already presents itself as the mandatory first step, `any` chose it first anyway. The difference is the guarantee: under `any` that order is Claude's choice; under `forced` it's enforced.
+- **The fastest run.** D1 took about 1 s under `forced`, 8 s under `any` and 9 s under `auto`.
+
+### 5.4 The three runs side by side
+
+| | `auto` | `any` | `forced` |
+|-|--------|-------|----------|
+| `tool_choice` | `{'type': 'auto'}` | `{'type': 'any'}` | `{'type': 'tool', 'name': 'extract_metadata'}` |
+| Calls | 4 | 4 | 4 |
+| Responses with a tool call | 4/4 | 4/4 | 4/4 |
+| Text-only responses | 0 | 0 | 0 |
+| `tool_use` blocks in total | 4 | 7 | 7 |
+| First block | `thinking` × 4 | `tool_use` × 4 | `tool_use` × 4 |
+| First tool | `extract_metadata` × 4 | `extract_metadata` × 4 | `extract_metadata` × 4 |
+| Type-specific call | none | D1, D4 invoice; R1 receipt | D1, D4 invoice; R1 receipt |
+| `stop_reason` | `tool_use` × 4 | `tool_use` × 4 | `tool_use` × 4 |
+| `check_input()` problems (first call) | 0 | 0 | 0 |
+| `APIError` | no | no | no |
+| Wall time (from log) | about 17 s | about 15 s | about 7 s |
+
+The whole run took 39 s (02:35:31 → 02:36:10). The log has no `API error:` line, so the script exited with `0`.
+
+**The corrections the log makes:**
+- **`auto` produced no text reply** (the curriculum and the README expect one, typically for N1). The guarantee difference is still real: `auto` *may* answer in text, `any` and `tool` may not.
+- **`any` didn't pick one tool per document type.** It always called `extract_metadata` first and then, in the same response, the type-specific tool. The summary lines (`D1->extract_metadata`, ...) report only the first call, so the routing the curriculum expects is visible only in the `tool_use` lines.
+- **`forced` didn't stop Claude from calling a second tool.** It made `extract_metadata` the guaranteed first call; `extract_invoice` and `extract_receipt` still followed where they fit.
+
+---
+
+## 6. Agentic AI concepts recap
+
+| Concept | How this POC shows it |
+|---------|-----------------------|
+| **`tool_choice: auto`** | No guarantee: Claude may call a tool or answer in text. Here it called one tool per document and thought first. |
+| **`tool_choice: any`** | A guaranteed tool call; Claude picks which. The call came first, with no text before it, on all 4 documents. |
+| **Forced `tool_choice`** | The named tool is guaranteed, as the first call, even for documents another tool fits better. |
+| **Parallel tool calls** | Under `any` and `forced`, one response held two `tool_use` blocks: metadata, then the type-specific extraction. |
+| **Tool descriptions as prompts** | "the mandatory first step for every inbox document" made `extract_metadata` the first call in every mode. |
+| **Strict tool use** | `"strict": True` + `additionalProperties: False`: every input matched its schema. |
+| **Verify the guarantee** | `check_input()` checks required keys, unknown keys, types and enums in plain Python. |
+| **Escape values** | `other` + `document_type_detail` let the newsletter be filed honestly; `unclear` is available in both enums. |
+| **Model capability limits** | `FORCED_MODEL = "claude-haiku-5-5"`: the code comment says Opus/Sonnet 5.5 and Fable 5.1 reject `any`/`tool` with a 400. |
+| **No loop, no tool execution** | Every response ends with `stop_reason` `tool_use`; the script reads the requested calls and never sends a `tool_result`. |
+| **Observability** | `log_model_io()` logs every block; the per-call check line adds `content[0].type` and the schema problems. |
+
+---
+
+## 7. Common mistakes this POC helps you avoid
+
+1. **Using `auto` when you need structured output.** It allowed a text reply in every call; that none came this time is luck plus a strong description, not a guarantee.
+2. **Using a forced tool when the document type is unknown.** `forced` would always call the one tool; `any` lets Claude pick the one that fits.
+3. **Assuming `any` or `tool` means exactly one call.** Under both modes, Claude made two calls in one response. If you need exactly one, ask for it explicitly (`disable_parallel_tool_use`) or handle every `tool_use` block.
+4. **Reading only `tool_uses[0]`.** The script's own summary hid 6 type-specific extractions. Loop over all `tool_use` blocks.
+5. **Assuming a guaranteed call has a valid input.** That's `strict`'s job, and still worth a check like `check_input()`.
+6. **Forgetting `additionalProperties: False` with `strict`.** Strict tool use needs it on every object.
+7. **Assuming every model supports forced tool use.** The script pins `claude-haiku-5-5` because the code comment says the 5.5 Opus/Sonnet models return a 400 for `any` and `tool`.
+8. **Trying to set `tool_choice` in the Agent SDK.** `ClaudeAgentOptions` has no such field; use `output_format` (POC 1) or call the Messages API.
+9. **Leaving no tool for "none of these".** Without `extract_metadata` and `other`, `any` would force the newsletter into an invoice or a receipt.
+10. **Treating an omitted optional key as "absent in the document".** D1's invoice number was printed but omitted. If a field matters, make it required and nullable, so Claude must state `null` explicitly.
+11. **Expecting the tool to run.** A `tool_use` block is a request. Nothing is executed or stored until your code does it.
+
+---
+
+## 8. Claude Architect exam lens
+
+### 8.1 What the exam tests on this topic
+
+The objectives come from `curriculum/04-Prompt-Engineering-Structured-Output/03-raw-Structured-Output-with-Tool-Use.md`. POC 2 covers objectives 2–4; POC 1 covers 1 and 5 (schema design), and its `INVOICE_SCHEMA` is `extract_invoice`'s input schema here.
+
+| Exam objective | What a correct answer looks like | Where this POC shows it |
+|----------------|----------------------------------|-------------------------|
+| 1. Extraction tool schema: 3 required, 3 nullable, `unclear`/`other`, a detail field | Optional fields nullable, `required` limited to always-present fields, escape values in the enum. | `extract_invoice` uses POC 1's `INVOICE_SCHEMA`; `METADATA_SCHEMA` and `RECEIPT_SCHEMA` follow the same rules |
+| 2. `tool_choice: auto` can return text instead of a tool call | `auto` gives no guaranteed structured output, so it's unsuitable when every document needs a record. | Run `auto`: the `text_only` branch in `main()`. Real run: 0 text replies, which shows the guarantee is about what's *allowed*, not what happens on one run |
+| 3. `tool_choice: any` always returns a tool call | Every response has `stop_reason` `tool_use`, a schema-valid tool call, no text-only responses. Right when the document type is unknown: Claude picks the tool. | Run `any`: 4/4, `first block tool_use`, `schema problems: 0`; the type-specific second calls |
+| 4. Force `{type: tool, name: extract_metadata}` | The named tool always runs, even when another fits better: a mandatory first step before enrichment. | Run `forced`: `extract_metadata` first on all 4, including D1 and R1 |
+| 5. 5 documents, 2 with missing fields → `null`, not invented values | Nullable fields come back `null`; no invented dates, amounts or identifiers. | POC 1. Here: D4's `extract_invoice` omits number and date instead of inventing them |
+
+> **Exam tip:** exam questions on `tool_choice` are about the Messages API. The Agent SDK has no `tool_choice`; its tool calls are effectively `auto`, and its guarantee of structured output is `output_format` (POC 1). If a question asks how to guarantee structured output "when the document type is unknown", the answer is `any`; "a step that must always run first" is a forced tool; "a chat that may or may not need a tool" is `auto`.
+
+### 8.2 The same guarantees with the Agent SDK
+
+The objectives describe the Messages API, which is what this POC uses. In the Agent SDK you can't set `tool_choice`, so each guarantee is built differently: `output_format` guarantees structured output, and your own code makes a step mandatory by running it first.
+
+```python
+from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
+
+# INBOX_SYSTEM, DOCUMENTS, METADATA_SCHEMA, INVOICE_SCHEMA and RECEIPT_SCHEMA are as in the POC.
+
+
+async def structured(settings, text: str, schema: dict) -> dict | None:
+    """One query() whose only way to finish is the StructuredOutput tool: guaranteed JSON, like any/tool."""
+    options = ClaudeAgentOptions(
+        model=settings.model_id, system_prompt=INBOX_SYSTEM, tools=[], setting_sources=[],
+        output_format={"type": "json_schema", "schema": schema}, max_turns=settings.max_turns,
+    )
+    async for message in query(prompt=text, options=options):  # raises ResultError after an error result
+        if isinstance(message, ResultMessage) and message.subtype == "success":
+            return message.structured_output
+    return None
+
+
+async def process(settings, doc_id: str) -> tuple[dict | None, dict | None]:
+    text = f"New document in the accounts inbox:\n\n{DOCUMENTS[doc_id]}"
+    meta = await structured(settings, text, METADATA_SCHEMA)  # the mandatory first step: your code runs it
+    schema = {"invoice": INVOICE_SCHEMA, "receipt": RECEIPT_SCHEMA}.get(meta["document_type"]) if meta else None
+    return meta, (await structured(settings, text, schema) if schema else None)  # then the type-specific step
+```
+
+| Messages API (`poc2_tool_choice.py`) | Agent SDK equivalent |
+|--------------------------------------|----------------------|
+| `tool_choice={"type": "auto"}` | The SDK default: every tool call is Claude's choice |
+| `tool_choice={"type": "any"}` + 3 tools | One `output_format` call per schema; or one schema that covers all types |
+| `tool_choice={"type": "tool", "name": "extract_metadata"}` | Your code runs the metadata `query()` first, then the type-specific one |
+| `"strict": True` on each tool | `output_format`: the SDK validates and re-prompts; `error_max_structured_output_retries` if it never fits |
+| `block.input` of each `tool_use` block | `ResultMessage.structured_output` |
+| Two `tool_use` blocks may come back in one response | One structured result per `query()`; the order is your code's |
+| Model must accept `any`/`tool` (`claude-haiku-5-5`) | Any model; no `tool_choice` to reject |
+| `stop_reason == "tool_use"`, no loop | Final `stop_reason == "tool_use"`, `subtype == "success"` |
+
+Two things the comparison makes obvious:
+- **A forced tool is a sequencing tool.** In the SDK you get the same "this step always runs first" by writing the sequence in code, which also guarantees it's the *only* thing that runs in that step.
+- **Guaranteed structure has two layers:** a call must happen (`any`/`tool`, or `output_format`), and its input must fit (`strict`, or SDK validation). The exam tests both.
+
+### 8.3 Scenario questions
+
+Try each one before reading the answer. These questions were written for this article to match the curriculum objectives above. They are not official exam questions.
+
+---
+
+**Scenario 1: The missing records**
+
+An inbox pipeline sends each document with three extraction tools and `tool_choice` left at the default `auto`. About 1 in 30 documents produces no database row; the logs show a friendly text summary instead of a tool call. What is the fix?
+
+- A. Add "always call a tool" to the system prompt.
+- B. Set `tool_choice` to `{"type": "any"}`, so every response must call one of the tools while Claude still picks which.
+- C. Force `extract_invoice` for every document.
+- D. Retry the document until a tool is called.
+
+**Answer: B.** `auto` lets Claude answer conversationally, so it can't guarantee structured output. `any` guarantees a tool call and keeps the choice of tool, which is right when the type is unknown. A reduces the rate but guarantees nothing. C files receipts and newsletters as invoices. D wastes calls and still guarantees nothing. *POC link:* `MODES` and the `text_only` branch in `main()`. In the real run `auto` happened to call a tool 4/4 times; nothing in the request required it.
+
+---
+
+**Scenario 2: Unknown document types**
+
+Documents arrive as invoices, receipts or anything else. Every document must produce a structured record, and the right extraction depends on the type. Which `tool_choice` fits?
+
+- A. `auto`
+- B. `any`, with one tool per type plus a metadata tool whose type enum includes `other`
+- C. `{"type": "tool", "name": "extract_invoice"}`
+- D. No tools; parse the text answer.
+
+**Answer: B.** `any` guarantees a call and lets Claude route by type; the metadata tool with `other` gives a valid record for documents no type-specific tool fits. *POC link:* the `any` run: D1 and D4 got `extract_invoice`, R1 `extract_receipt`, N1 only `extract_metadata` with `document_type: 'other'`.
+
+---
+
+**Scenario 3: The mandatory first step**
+
+Compliance requires that every incoming document's type and sender are recorded before any enrichment step runs. How do you guarantee it?
+
+- A. Describe the metadata tool as "mandatory" and use `auto`.
+- B. Force it: `tool_choice={"type": "tool", "name": "extract_metadata"}`.
+- C. Use `any` and hope Claude picks it.
+- D. Put the metadata fields into every type-specific tool.
+
+**Answer: B.** Forced selection makes the step run regardless of Claude's judgement. A and C rely on Claude's choice; they worked in this run, but they aren't guarantees. D spreads the step across tools and still doesn't force one. *POC link:* the `forced` run: `extract_metadata` was the first call on all 4 documents, including D1 (plainly an invoice) and R1 (plainly a receipt).
+
+---
+
+**Scenario 4: Forced, but not alone**
+
+A team forces `extract_metadata` and is surprised to see `extract_invoice` in the same response, after it. Their enrichment code assumed exactly one call. What explains it, and what should they do?
+
+- A. A bug: forced `tool_choice` should prevent other tools.
+- B. Forcing guarantees the named tool is called, not that it's the only call; Claude may add parallel calls. Process every `tool_use` block, or ask for a single call with `disable_parallel_tool_use`.
+- C. Remove the other tools from the request permanently.
+- D. Switch to `auto`.
+
+**Answer: B.** A forced choice fixes the first call, not the number of calls. Code that reads only the first block silently drops the rest. C works only if the other tools are never needed in that step. D removes the guarantee. *POC link:* the real `forced` run: D1, D4 and R1 each got a second call (`extract_invoice` or `extract_receipt`); `main()` reads only `tool_uses[0]`, so its summary shows none of them.
+
+---
+
+**Scenario 5: Guaranteed call, broken input**
+
+With `tool_choice: any`, a tool call always comes back, but now and then `category` holds a value outside its enum, or a required key is missing. What fixes this?
+
+- A. Switch to `auto`.
+- B. Set `"strict": true` on the tool (with `additionalProperties: false` on every object) so the input is constrained to the schema, and keep a schema check in code.
+- C. Add more examples to the description.
+- D. Lower `max_tokens`.
+
+**Answer: B.** `any` guarantees *a call*; `strict` makes its input schema-valid. A check like `check_input()` verifies it. *POC link:* `"strict": True` on every tool in `TOOLS`, `additionalProperties: False` in every schema, and `schema problems: 0` in all three summary lines.
+
+---
+
+**Scenario 6: A 400 on forced tool use**
+
+A team moves an extraction pipeline that forces a tool to a newer, larger model, and every request now fails with HTTP 400. Nothing else changed. What is the most likely cause?
+
+- A. The tool schema is too large.
+- B. The new model doesn't accept `tool_choice` `any`/`tool`; keep a model that does for that step, or use structured output without forcing (e.g. the Agent SDK's `output_format`).
+- C. The API key lacks permissions.
+- D. `strict` is not allowed with forced tools.
+
+**Answer: B.** Forced tool use isn't supported on every model. *POC link:* `FORCED_MODEL = "claude-haiku-5-5"  # accepts any/tool; Opus 5.5, Sonnet 5.5 and Fable 5.1 answer them with a 400`, and the `except anthropic.APIError` branch in `main()` that logs it per document.
+
+---
+
+**Scenario 7: `tool_choice` in the Agent SDK**
+
+A developer looks for `tool_choice` in `ClaudeAgentOptions` to force structured output from an agent. They can't find it. What should they use?
+
+- A. `allowed_tools=["StructuredOutput"]`.
+- B. `output_format={"type": "json_schema", "schema": ...}`: Claude must hand in its answer through the `StructuredOutput` tool, and the SDK validates it.
+- C. `permission_mode="bypassPermissions"`.
+- D. A hook that blocks text replies.
+
+**Answer: B.** The Agent SDK has no `tool_choice`; every tool call is effectively `auto`. Its guarantee of structured output is `output_format`, and a mandatory step is a separate `query()` your code runs first. *POC link:* the docstring of `poc2_tool_choice.py` ("The Agent SDK has no tool_choice"); POC 1's `build_extract_options()`.
+
+---
+
+**Scenario 8: A newsletter under `any`**
+
+Under `tool_choice: any`, the only tools are `extract_invoice` and `extract_receipt`. A marketing newsletter arrives. What happens, and what's the better design?
+
+- A. Claude replies in text; nothing to fix.
+- B. Claude must call one of the two tools, so the newsletter is recorded as an invoice or receipt with made-up fields. Add a tool (or an enum value) that can say "other".
+- C. The API returns an error.
+- D. Claude calls no tool and `stop_reason` is `end_turn`.
+
+**Answer: B.** `any` forbids a text-only answer, so with no fitting tool, Claude has to misuse one. Give it an honest option. *POC link:* `extract_metadata` with `document_type` enum `["invoice", "receipt", "unclear", "other"]`; under `any` and `forced`, N1 got only `extract_metadata` with `'other'` and the detail "Marketing newsletter ... No payment request."
+
+---
+
+**Scenario 9: Reading the response**
+
+After a call with `tool_choice: any`, the response's `stop_reason` is `tool_use` and `content` holds two `tool_use` blocks. The pipeline stores `content[0].input` only. What's the risk?
+
+- A. None; the first block is always the important one.
+- B. The second extraction is lost. Iterate over all `tool_use` blocks and handle each by name.
+- C. `stop_reason` should be `end_turn`; the call failed.
+- D. The second block is a duplicate.
+
+**Answer: B.** A response can carry several tool calls. *POC link:* in the `any` run, `content[0]` was `extract_metadata` and `content[1]` the real extraction (`extract_invoice` with vendor, total, category, date and tax); `main()`'s `tool_uses[0]` reported only the first.
+
+---
+
+**Scenario 10: An optional field left out**
+
+An `extract_invoice` call returns no `invoice_number` key for an invoice that prints one, and passes schema validation. How do you make the extractor commit to an answer for that field?
+
+- A. Make `invoice_number` required with type `["string", "null"]`: Claude must state it, as a value or as `null`.
+- B. Make it required and non-nullable.
+- C. Remove it from the schema.
+- D. Lower `max_tokens`.
+
+**Answer: A.** Optional keys may be omitted, so "omitted" can mean "absent" or "skipped". Required + nullable forces an explicit answer while keeping `null` honest. B brings back the fabrication pressure from POC 1. *POC link:* the real `any` and `forced` runs: D1's `extract_invoice` omitted `invoice_number` (`RS-20417` is printed), and `check_input()` reported no problem because the key is optional.
+
+---
+
+### 8.4 Quick-recall cheat sheet
+
+```
+auto                  → Claude MAY call a tool or reply in text: no guaranteed structured output
+any                   → Claude MUST call a tool, picks which: document type unknown
+{type: tool, name}    → Claude MUST call that tool: mandatory first step (metadata before enrichment)
+forced ≠ only         → other tool calls may follow in the same response (disable_parallel_tool_use)
+read every block      → a response can hold several tool_use blocks; don't stop at content[0]
+strict: true          → guaranteed call ALSO schema-valid; needs additionalProperties: false
+honest options        → an "other"/"unclear" path so any/forced never forces a wrong record
+model support         → claude-haiku-5-5 accepts any/tool; the POC notes Opus/Sonnet 5.5, Fable 5.1 return 400
+Agent SDK             → no tool_choice (calls are auto); guarantee = output_format; sequence in code
+stop_reason tool_use  → a request, not an execution: your code runs the tool and sends tool_result
+optional vs required  → optional keys may vanish; required + nullable forces value-or-null
+```
+
+---
+
+## 9. How to run it
+
+```bash
+cd 04-Prompt-Engineering-Structured-Output/03-Structured-Output-with-Tool-Use
+source .venv/bin/activate        # the folder's venv (anthropic 2.8.0, claude-agent-sdk 0.2.181)
+python poc2_tool_choice.py       # paid: 3 modes × 4 documents = 12 Messages API calls on claude-haiku-5-5
+python poc1_schema_design.py     # paid: POC 1, naive vs nullable schema through the Agent SDK
+```
+
+- Without the venv: `python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt`, then `cp .env.example .env` and add your key.
+- Both scripts call the API. This folder has no free offline demo.
+- `.env` needs only `ANTHROPIC_API_KEY` for this script. `MODEL_ID`, `MAX_TURNS` and `MAX_BUDGET_USD` are read by `load_settings()` but not used: the model is fixed in `FORCED_MODEL`, and there is no agent loop to cap.
+- Every model input and output, the per-call checks and the summaries are printed to the console and written to `logs/poc2_tool_choice_<date>_<time>.log`. Expect `auto` to vary between runs (a text reply on N1 is possible), and the number of `tool_use` blocks per response to vary too.
+- The exit code is `0` when all modes finish; an `anthropic.APIError` on one call is logged and skipped, not fatal. It's `1` only on a setup failure (`OSError`, `RuntimeError`).
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>
+(function () {
+  const art = document.getElementById('article');
+  art.innerHTML = marked.parse(document.getElementById('src').textContent, { gfm: true });
+
+  // Hero: move h1 + metadata blockquote
+  const heroText = document.getElementById('hero-text');
+  const h1 = art.querySelector('h1');
+  if (h1) {
+    const t = h1.innerHTML; const i = t.indexOf(': ');
+    h1.innerHTML = i > -1 ? '<span class="eyebrow">' + t.slice(0, i + 1) + '</span><span class="rest">' + t.slice(i + 2) + '</span>' : t;
+    heroText.appendChild(h1);
+    const bq = art.firstElementChild;
+    if (bq && bq.tagName === 'BLOCKQUOTE') {
+      const ul = document.createElement('ul'); ul.className = 'meta';
+      bq.querySelector('p').innerHTML.split('\n').forEach(function (line) {
+        if (!line.trim()) return; const li = document.createElement('li'); li.innerHTML = line; ul.appendChild(li);
+      });
+      heroText.appendChild(ul); bq.remove();
+    }
+  }
+
+  // Headings: number badges, ids, TOC
+  const toc = document.getElementById('toc');
+  const used = {};
+  art.querySelectorAll('h2, h3, h4').forEach(function (h) {
+    const text = h.textContent;
+    let id = text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    if (used[id]) id += '-' + (++used[id]); else used[id] = 1;
+    h.id = id;
+    const m = h.innerHTML.match(/^(\d+(?:\.\d+)*\.?)\s/);
+    if (m) h.innerHTML = '<span class="num">' + m[1] + '</span>' + h.innerHTML.slice(m[0].length);
+    if (h.tagName === 'H4') return;
+    const li = document.createElement('li'); const a = document.createElement('a');
+    a.href = '#' + id; a.textContent = text; if (h.tagName === 'H3') a.className = 'sub';
+    li.appendChild(a); toc.appendChild(li);
+  });
+
+  // Tables
+  art.querySelectorAll('table').forEach(function (t) {
+    const w = document.createElement('div'); w.className = 'table-wrap'; t.before(w); w.appendChild(t);
+  });
+
+  // Code blocks
+  art.querySelectorAll('pre').forEach(function (pre) {
+    const code = pre.querySelector('code');
+    const lm = code && (code.className.match(/language-(\w+)/) || [])[1];
+    const box = document.createElement('div'); box.className = 'code';
+    const bar = document.createElement('div'); bar.className = 'code-bar';
+    bar.innerHTML = '<i></i><i></i><i></i><span class="lang ' + (lm || 'text') + '">' + (lm || 'text') + '</span><span class="spacer"></span>';
+    const btn = document.createElement('button'); btn.type = 'button'; btn.textContent = 'Copy';
+    btn.addEventListener('click', function () {
+      const done = function () { btn.textContent = 'Copied'; setTimeout(function () { btn.textContent = 'Copy'; }, 1400); };
+      const fallback = function () { const r = document.createRange(); r.selectNodeContents(code); const s = getSelection(); s.removeAllRanges(); s.addRange(r); btn.textContent = 'Selected'; };
+      try { navigator.clipboard.writeText(code.textContent).then(done, fallback); } catch (e) { fallback(); }
+    });
+    bar.appendChild(btn);
+    pre.before(box); box.appendChild(bar); box.appendChild(pre);
+    if (lm && window.hljs && hljs.getLanguage(lm)) hljs.highlightElement(code);
+  });
+
+  // Scenario cards
+  const isHead = function (el) {
+    return el.tagName === 'P' && el.children.length === 1 && el.firstElementChild.tagName === 'STRONG' &&
+      el.textContent.trim() === el.firstElementChild.textContent.trim() && /^Scenario \d+/.test(el.textContent.trim());
+  };
+  let el = art.firstElementChild;
+  while (el) {
+    if (isHead(el)) {
+      const card = document.createElement('section'); card.className = 'scenario';
+      el.before(card); el.classList.add('scenario-head');
+      const s = el.firstElementChild;
+      s.innerHTML = s.innerHTML.replace(/^(Scenario \d+:)\s*/, '<span class="pill">$1</span> ');
+      let n = el;
+      while (n && !(n.tagName === 'HR' || /^H[1-6]$/.test(n.tagName) || n.classList.contains('scenario'))) {
+        const next = n.nextElementSibling; card.appendChild(n); n = next;
+      }
+      el = n; continue;
+    }
+    el = el.nextElementSibling;
+  }
+  art.querySelectorAll('hr').forEach(function (hr) {
+    const p = hr.previousElementSibling, n = hr.nextElementSibling;
+    if ((p && p.classList.contains('scenario')) || (n && n.classList.contains('scenario'))) hr.remove();
+  });
+  art.querySelectorAll('.scenario').forEach(function (card) {
+    const ansP = Array.from(card.querySelectorAll(':scope > p')).find(function (p) { return /^Answer:/.test(p.textContent.trim()); });
+    if (!ansP) return;
+    const correct = (ansP.textContent.match(/Answer:\s*([A-D])/) || [])[1];
+    const det = document.createElement('details'); det.className = 'answer';
+    det.innerHTML = '<summary>Reveal answer</summary>';
+    ansP.before(det); det.appendChild(ansP);
+    const ul = Array.from(card.querySelectorAll(':scope > ul')).find(function (u) { return /^[A-D]\.\s/.test(u.textContent.trim()); });
+    if (!ul) return;
+    ul.className = 'options';
+    const items = Array.from(ul.children);
+    items.forEach(function (li) {
+      li.innerHTML = li.innerHTML.replace(/^([A-D]\.)\s/, '<span class="opt-key">$1</span><span>') + '</span>';
+      li.dataset.key = li.textContent.trim().charAt(0);
+      li.tabIndex = 0; li.setAttribute('role', 'button');
+      const pick = function () {
+        items.forEach(function (o) { o.classList.remove('wrong', 'correct'); });
+        if (li.dataset.key !== correct) li.classList.add('wrong');
+        items.forEach(function (o) { if (o.dataset.key === correct) o.classList.add('correct'); });
+        det.open = true;
+      };
+      li.addEventListener('click', pick);
+      li.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } });
+    });
+    det.addEventListener('toggle', function () {
+      if (det.open) items.forEach(function (o) { if (o.dataset.key === correct) o.classList.add('correct'); });
+    });
+  });
+
+  // Inline code pills, colour-coded by meaning
+  const kinds = [
+    ['k-bad', /error_|ResultError|ClaudeSDKError|^None$|RuntimeError|ValueError|OSError|is_error|max_tokens|eval\(\)|async_launched|BLOCKED|Handoff rejected|\['fusion'\]|^missing$|^partial$|complete: False|^empty$|^wrong$|^probe:|no structured output|^invented|^wrong\(|APIError/],
+    ['k-ok', /end_turn|"success"|^success$|well_covered|complete: True|^correct$|already fine|^null$/],
+    ['k-cap', /max_turns|max_budget_usd|MAX_TURNS|MAX_BUDGET_USD|MAX_ITERATIONS|max_iterations|COVERAGE_THRESHOLD|readOnlyHint|tools=\[|allowed_tools|setting_sources|ENABLE_TOOL_SEARCH|maxTurns|output_format|output_config|DISABLE_|MODEL_ID|with_agents|inherit|mcp_servers|agents=|^thinking$|agent_tool|approve_agent|SEQUENTIAL_RULE|PARALLEL_RULE|VERIFY_RULE|HANDOFF_RULE|^gate$|verify_rule|^handoff$|HANDOFF_FIELDS|PostToolUse|PreToolUse|HookMatcher|^hooks=|NORMALIZE_HOOKS|_SCHEMA$|FILE_REVIEW|CROSS_FILE_ISSUES|^\["(string|number)", "null"\]$|^"?unclear"?$|^"?other"?$|category_detail|^required$|ABSENT|CATEGORIES|EXTRACT_PROMPT|^RUNS$|tool_choice|strict|disable_parallel_tool_use|FORCED_MODEL|^MODES$|^INBOX|MAX_TOKENS|^"?(auto|any|forced)"?$|^\{['"]type['"]/],
+    ['k-tool', /tool_use|tool_result|ToolUseBlock|ToolResultBlock|mcp__|calculator|web_search|@tool|_search_backend|_evaluate|^"?Agent"?$|^Task$|StructuredOutput|read_document|subagent_type|^web-searcher$|^doc-analyst$|^synthesizer$|list_documents|process_refund|get_customer|lookup_order|escalate_to_human|extract_invoice|extract_receipt|extract_metadata/],
+    ['k-msg', /Message\b|TextBlock|ThinkingBlock|stop_reason|subtype|message\.result|\.result\b|structured_output|^\[(coordinator|web-searcher|doc-analyst|synthesizer)\]$|hand-back|agentId|<usage>|init_tools|message_id|system:init|hookSpecificOutput|updatedToolOutput|permissionDecision|tool_response|tool_input|^<(example|document|reasoning|extraction)>$/],
+    ['k-fn', /query|ClaudeAgentOptions|build_options|run_agent|load_settings|asyncio|main\(\)|Settings|run_coordinator|research_once|decompose|delegate|build_coordinator_options|missing_categories|log_model_io|setup_logging|text_of|run_subagent|agent_loop|AgentDefinition|create_sdk_mcp_server|COORDINATOR_PROMPT|^AGENTS$|assess_coverage|coverage_percent|merge_sections|^research(\(\))?$|build_pipeline_options|parse_findings|parse_json_object|delegation_timing|coordinator_prompt|strip_metadata|check_metadata_passed|verify_attribution|diagnose|run_support|build_support_options|build_support_server|validate_handoff|SupportSession|verified_ids|normalize_output|normalize_record|to_iso|to_status|same_shape|parse_summary|response_text|build_hook_options|HookState|refund_limit|aml_gate|record_aml|load_repo|format_file|run_review|log_scores|flagged|build_review_options|multi_pass|REVIEWER_PROMPT|INTEGRATION_PROMPT|FILE_PROMPT|^extract(\(\))?$|^score(\(\))?$|run_arm|main_report|^cells(\(\))?$|^correct\(\)$|iso_dates|^accuracy(\(\))?$|examples_block|build_extract_options|_PROMPT$|^EXAMPLES$|^ARMS$|^TRUTH$|^DOCUMENTS$|DOC_TYPES|^_norm|check_input|^send(\(\))?$|AsyncAnthropic|messages\.create/]
+  ];
+  art.querySelectorAll(':not(pre) > code').forEach(function (c) {
+    const t = c.textContent;
+    for (let i = 0; i < kinds.length; i++) { if (kinds[i][1].test(t)) { c.classList.add(kinds[i][0]); break; } }
+  });
+
+  // Wrap each h2 and what follows into a coloured section
+  const hues = ['--c1', '--c2', '--c3', '--c4', '--c5', '--c6'];
+  let secIdx = 0, cur = null, node = art.firstElementChild;
+  while (node) {
+    const next = node.nextElementSibling;
+    if (node.tagName === 'HR' && next && next.tagName === 'H2') { node.remove(); node = next; continue; }
+    if (node.tagName === 'H2') {
+      cur = document.createElement('section'); cur.className = 'sec';
+      cur.style.setProperty('--sec', 'var(' + hues[secIdx++ % hues.length] + ')');
+      node.before(cur);
+    }
+    if (cur) cur.appendChild(node);
+    node = next;
+  }
+  toc.querySelectorAll('a').forEach(function (a) {
+    const h = document.getElementById(a.getAttribute('href').slice(1));
+    const sec = h && h.closest('.sec');
+    if (sec) a.style.setProperty('--sec', sec.style.getPropertyValue('--sec'));
+    a.insertAdjacentHTML('afterbegin', '<span class="dot"></span>');
+  });
+
+  // Collapse TOC on narrow screens
+  if (window.matchMedia('(max-width: 1000px)').matches) document.getElementById('toc-details').open = false;
+
+  // Progress + active TOC link
+  const bar = document.getElementById('bar');
+  const links = Array.from(toc.querySelectorAll('a'));
+  const heads = links.map(function (a) { return document.getElementById(a.getAttribute('href').slice(1)); });
+  let ticking = false;
+  const update = function () {
+    const max = document.documentElement.scrollHeight - innerHeight;
+    bar.style.width = (max > 0 ? (scrollY / max) * 100 : 0) + '%';
+    let cur = 0;
+    heads.forEach(function (h, i) { if (h.getBoundingClientRect().top < 120) cur = i; });
+    links.forEach(function (a, i) { a.classList.toggle('active', i === cur); });
+    ticking = false;
+  };
+  addEventListener('scroll', function () { if (!ticking) { ticking = true; requestAnimationFrame(update); } }, { passive: true });
+  update();
+})();
+</script>
+
+</body></html>

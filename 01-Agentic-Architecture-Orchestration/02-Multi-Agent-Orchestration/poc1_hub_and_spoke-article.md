@@ -2,21 +2,22 @@
 
 > **File:** `poc1_hub_and_spoke.py` (with `coordinator.py`, `research_setup.py` and `common.py`)
 > **Domain:** 01 Agentic Architecture & Orchestration → 02 Multi-Agent Orchestration
-> **SDK:** Claude Agent SDK for Python (`claude-agent-sdk >=0.2.174,<0.3`)
+> **SDK:** Claude Agent SDK for Python (`claude-agent-sdk >=0.2.174,<0.3`; 0.2.174 in the folder's `.venv`)
 
 ---
 
 ## 1. What this POC proves
 
-This POC builds one research round the way the exam describes a hub-and-spoke system. Then it runs a controlled test of what a subagent can and can't know.
+This POC builds one research round the way the exam describes a hub-and-spoke system. Then it runs a controlled test of what a subagent can and can't know. Every claim below is checked against one real run: `logs/poc1_hub_and_spoke_20261027_182029.log`.
 
 | # | Idea | Where it shows up in the code |
 |---|------|------------------------------|
 | 1 | **The coordinator is the hub.** It decomposes the topic, picks each subagent, writes each subagent's brief and merges the reports. The subagents only research. | `COORDINATOR_PROMPT`, `decompose()`, `delegate()` |
 | 2 | **Spawning a subagent is a tool call.** The coordinator calls the built-in `Agent` tool. The SDK runs the subagent and returns its report as that call's `tool_result`. Your code has no subagent loop. | `tools=["Agent"]` and `agents=AGENTS` in `build_coordinator_options()`; `run_coordinator()` pairs each Agent call `id` with its report |
-| 3 | **A subagent knows only its brief.** No shared memory, no inherited conversation. A fact the coordinator leaves out of the Agent `prompt` doesn't exist for the subagent. | Run 2: the thin brief in `BRIEFS[0]` |
-| 4 | **Poor subagent result? Check the brief first.** Run 3 fixes Run 2 by changing only the brief. The subagent stays the same. | Run 3: the full brief in `BRIEFS[1]` |
-| 5 | **The decomposition decides the coverage.** A category the coordinator never lists is never researched. A deterministic check catches it. | `decompose()` + `missing_categories()`; in the real run it returned `['fusion']` |
+| 3 | **One stream carries three agents.** Every message says which agent it belongs to through `parent_tool_use_id`. The log turns that id into a tag: `[coordinator]`, `[web-searcher]` or `[doc-analyst]`. | `log_model_io()` in `common.py` |
+| 4 | **A subagent knows only its brief.** No shared memory, no inherited conversation. A fact the coordinator leaves out of the Agent `prompt` doesn't exist for the subagent. | Run 2: the thin brief in `BRIEFS[0]` |
+| 5 | **Poor subagent result? Check the brief first.** Run 3 fixes Run 2 by changing only the brief. The subagent stays the same. | Run 3: the full brief in `BRIEFS[1]` |
+| 6 | **The decomposition decides the coverage.** A category the coordinator never lists is never researched. A deterministic check catches it. | `decompose()` + `missing_categories()`; in the real run it logged `['fusion']` |
 
 The pattern in one line:
 
@@ -31,20 +32,23 @@ coordinator ──Agent{subagent_type, prompt}──▶ subagent (fresh context:
 ```
 02-Multi-Agent-Orchestration/
 ├── .env                    ← ANTHROPIC_API_KEY, MODEL_ID, MAX_TURNS, MAX_BUDGET_USD
-├── common.py               ← load_settings(): reads .env into a frozen Settings object
+├── requirements.txt        ← claude-agent-sdk >=0.2.174,<0.3 and python-dotenv
+├── common.py               ← Settings, load_settings(), setup_logging(), log_model_io()
 ├── research_setup.py       ← mock Helios corpus, 2 tools, COORDINATOR_PROMPT, AGENTS, build_coordinator_options()
 ├── coordinator.py          ← run_coordinator() and the coordinator's jobs: decompose(), delegate(), research_once()
 ├── poc1_hub_and_spoke.py   ← entry point: 3 runs, 4 query() calls
-└── poc2_refinement.py      ← POC 2: the refinement loop (not covered here)
+├── poc2_refinement.py      ← POC 2: the refinement loop (not covered here)
+└── logs/
+    └── poc1_hub_and_spoke_20261027_182029.log   ← the real run used in sections 3.2 and 5
 ```
 
-The code in this article is the logging-free copy in `raw-poc/01-Agentic-Architecture-Orchestration/02-Multi-Agent-Orchestration/`. The real run in sections 3.2 and 5 comes from the logging version of the same scripts, in `01-Agentic-Architecture-Orchestration/02-Multi-Agent-Orchestration/`.
+Every snippet in this article is copied from these files, logging statements included. Each logging statement is named with the log line tag it writes, so you can find its output in the log file.
 
-`poc1_hub_and_spoke.py` is 65 lines because the setup lives in three modules:
-- `common.py` covers **configuration** (which model, how many turns, how much money).
+`poc1_hub_and_spoke.py` is 70 lines because the setup lives in three modules:
+- `common.py` covers **configuration and observability**: which model, how many turns, how much money, and one log line per model input or output, tagged with its agent.
 - `research_setup.py` covers **capabilities** (the two tools and the two subagents) and **guardrails** (the options of every coordinator call).
-- `coordinator.py` covers **orchestration** (stream one coordinator call; decompose, then delegate).
-- `poc1_hub_and_spoke.py` covers **the experiments** (one research round, then the isolation test).
+- `coordinator.py` covers **orchestration**: stream one coordinator call; decompose, then delegate.
+- `poc1_hub_and_spoke.py` covers **the experiments**: one research round, then the isolation test.
 
 ---
 
@@ -56,123 +60,139 @@ The code in this article is the logging-free copy in `raw-poc/01-Agentic-Archite
 python poc1_hub_and_spoke.py
         │
         ▼
-asyncio.run(main())
+asyncio.run(main())                                                    [poc1_hub_and_spoke.py]
         │
-        ├─▶ load_settings()                                               [common.py]
+        ├─▶ load_settings()                                            [common.py]
         │      └─ .env → Settings(model_id, max_turns, max_budget_usd), frozen
+        ├─▶ setup_logging("poc1_hub_and_spoke")                        [common.py]
+        │      └─ console + logs/poc1_hub_and_spoke_<date>_<time>.log, lines "HH:MM:SS  message"
         │
-        ├─▶ Run 1: report = research_once(settings, TOPIC)                [coordinator.py]
+        ├─▶ Run 1: report = research_once(settings, TOPIC)             [coordinator.py]
         │      ├─▶ decompose(settings, topic)
         │      │      ├─ build_coordinator_options(settings, SUBTOPICS_SCHEMA, with_agents=False)
         │      │      │     → tools=[], no agents, no MCP server: the coordinator only thinks
-        │      │      ├─ run_coordinator(prompt, options)                 → query() call 1
+        │      │      ├─ run_coordinator(prompt, options)              → query() call 1
         │      │      └─ Python check: at least 5 distinct subtopics, else ValueError
         │      └─▶ delegate(settings, topic, subtopics)
         │             ├─ build_coordinator_options(settings, SECTIONS_SCHEMA)
         │             │     → tools=["Agent"], agents=AGENTS, mcp_servers={"research": ...}
-        │             └─ run_coordinator(prompt, options)                 → query() call 2
+        │             └─ run_coordinator(prompt, options)              → query() call 2
         │
-        ├─▶ missed = missing_categories(report["subtopics"])              [research_setup.py]
+        ├─▶ log.info("Categories the decomposition missed: %s",
+        │            missing_categories(report["subtopics"]))          [research_setup.py]
         │
         └─▶ Runs 2-3: for brief in BRIEFS:
                └─ run_coordinator(ISOLATION_TEST.format(brief=brief),
-                                  build_coordinator_options(settings))    → query() calls 3 and 4
+                                  build_coordinator_options(settings)) → query() calls 3 and 4
 ```
 
-All four calls go through the same function, and this is what happens inside it:
+All four calls go through the same function, and this is what happens inside it. The right-hand column names the log line each step writes.
 
 ```
-run_coordinator(prompt, options)                                          [coordinator.py]
+run_coordinator(prompt, options)                                                      [coordinator.py]
+   │
+   ├─ log.info("MODEL INPUT   prompt ...")                                          → log: prompt
    │
    └─▶ async for message in query(prompt=prompt, options=options):
           │
-          │   ┌─────────────────────── SDK-owned: one coordinator call ────────────────────────┐
-          │   │ starts the bundled Claude Code; the coordinator gets COORDINATOR_PROMPT        │
-          │   │ ┌─▶ coordinator Claude responds                                                │
-          │   │ │     ├─ tool_use Agent {subagent_type, prompt = the brief}       (id = A)     │
-          │   │ │     │    ┌──── subagent: fresh context = its own prompt + the brief ────┐    │
-          │   │ │     │    │  its own loop: tool_use mcp__research__* → your handler      │    │
-          │   │ │     │    │               → tool_result → ... → final text = the report  │    │
-          │   │ │     │    └──────────────────────────────────────────────────────────────┘    │
-          │   │ │     │   tool_result (tool_use_id = A) = the report                           │
-          │   │ └─────┘   (next coordinator turn)                                              │
-          │   │       ├─ StructuredOutput call (with output_format) → accepted                 │
-          │   │       └─ or final text, no tool_use (stop_reason = end_turn)                   │
-          │   │ yields ResultMessage (success / error_*)                                       │
-          │   └────────────────────────────────────────────────────────────────────────────────┘
+          │   ┌──────────────────── SDK-owned: one coordinator call ───────────────────────┐
+          │   │ starts the bundled Claude Code; the coordinator gets COORDINATOR_PROMPT    │
+          │   │ ┌─▶ coordinator Claude responds                                            │
+          │   │ │     ├─ tool_use Agent {subagent_type, prompt = the brief}   (id = A)     │  → log: tool_use  [coordinator]
+          │   │ │     │    ┌──── subagent: fresh context = its own prompt + the brief ───┐ │
+          │   │ │     │    │  its own loop: tool_use mcp__research__* → your handler     │ │  → log: tool_use  [web-searcher]
+          │   │ │     │    │               → tool_result → ... → final text = report    │ │  → log: tool_result [web-searcher]
+          │   │ │     │    └─────────────────────────────────────────────────────────────┘ │
+          │   │ │     │   tool_result (tool_use_id = A) = the report                       │  → log: tool_result [coordinator]
+          │   │ └─────┘   (next coordinator turn)                                          │
+          │   │       ├─ StructuredOutput call (with output_format) → accepted             │  → log: structured
+          │   │       └─ or final text, no tool_use (stop_reason = end_turn)               │  → log: text
+          │   │ yields ResultMessage (success / error_*)                                   │  → log: stop_reason
+          │   └────────────────────────────────────────────────────────────────────────────┘
           │
+          ├─ log_model_io(message, agent_names)   writes the log lines marked above
           ├─ hub's Agent call → agent_calls[id] = {"id", "subagent_type", "prompt", "report": None}
           ├─ its tool_result  → agent_calls[id]["report"] = text_of(block.content)
           ├─ ResultMessage    → subtype; if "success": output = structured_output or result
-          └─ ResultError      → pass; output stays None
+          └─ ResultError      → log.error("The coordinator call failed: %s")         → log: (none in this run)
 ```
 
 ### 3.2 Messages your `async for` receives (Run 1's `delegate()` call, real output)
 
-The values below come from the real run on 2026-10-27, recorded in `01-Agentic-Architecture-Orchestration/02-Multi-Agent-Orchestration/logs/poc1_hub_and_spoke_20261027_182029.log`. That log was written by the **logging version** of this POC: the same code, plus one log line for each prompt and for each model input or output in the stream. Each log line holds fields of one message from the stream:
+The values below come from the real run on 2026-10-27, recorded in `logs/poc1_hub_and_spoke_20261027_182029.log`. The log holds only model input and model output. Each log line comes from one statement in the code:
 
-| Log line tag | Message class yielded by `query()` | Field logged |
-|--------------|------------------------------------|--------------|
-| `MODEL INPUT   prompt` | *(none: it's the `prompt` passed to `run_coordinator()`)* | `prompt` |
-| `MODEL OUTPUT  thinking` | `AssistantMessage` → `ThinkingBlock` | `block.thinking`, only when non-empty (none in this log) |
-| `MODEL OUTPUT  text` | `AssistantMessage` → `TextBlock` | `block.text` |
-| `MODEL OUTPUT  tool_use` | `AssistantMessage` → `ToolUseBlock` | `block.name`, `block.input`, `block.id` |
-| `MODEL OUTPUT  structured` | `AssistantMessage` → `ToolUseBlock` named `StructuredOutput` | `block.input`, `block.id` |
-| `MODEL INPUT   tool_result` | `UserMessage` → `ToolResultBlock` | `block.content`, `block.tool_use_id`, `block.is_error` |
-| `MODEL OUTPUT  stop_reason` | `ResultMessage` | `message.stop_reason`, `message.subtype` |
-| `[coordinator]`, `[web-searcher]`, `[doc-analyst]` | the message the line came from | `message.parent_tool_use_id`: `None` gives `coordinator`; any other value gives the `subagent_type` of the Agent call with that id |
-| `Categories the decomposition missed: ...` | *(none: the logging version's `main()` writes it; this code keeps it in `missed`)* | `missing_categories(report["subtopics"])` |
+| Log line tag | Message class yielded by `query()` | Field logged | Written by |
+|--------------|------------------------------------|--------------|------------|
+| `MODEL INPUT   prompt` | *(none: it's the `prompt` passed to `run_coordinator()`)* | `prompt` | `log.info("MODEL INPUT   prompt ...")` in `run_coordinator()` (`coordinator.py`) |
+| `MODEL OUTPUT  thinking` | `AssistantMessage` → `ThinkingBlock` | `block.thinking`, only when non-empty | `log_model_io()` (`common.py`). None in this log |
+| `MODEL OUTPUT  text` | `AssistantMessage` → `TextBlock` | `block.text` | `log_model_io()` |
+| `MODEL OUTPUT  structured` | `AssistantMessage` → `ToolUseBlock` named `StructuredOutput` | `block.input`, `block.id` | `log_model_io()` |
+| `MODEL OUTPUT  tool_use` | `AssistantMessage` → any other `ToolUseBlock` | `block.name`, `block.input`, `block.id` | `log_model_io()` |
+| `MODEL INPUT   tool_result` | `UserMessage` → `ToolResultBlock` | `block.content`, `block.tool_use_id`, `block.is_error` | `log_model_io()` |
+| `MODEL OUTPUT  stop_reason` | `ResultMessage` | `message.stop_reason`, `message.subtype` | `log_model_io()` |
+| `[coordinator]`, `[web-searcher]`, `[doc-analyst]` | the message the line came from | `message.parent_tool_use_id`: `None` gives `coordinator`; any other value gives the `subagent_type` of the Agent call with that id | `who = ...` at the top of `log_model_io()` |
+| `Categories the decomposition missed: ...` | *(none: a Python check, not model I/O)* | `missing_categories(report["subtopics"])` | `log.info(...)` in `main()` (`poc1_hub_and_spoke.py`) |
+| `Stopped: ...`, `SDK error: ...`, `The coordinator call failed: ...` | *(none)* | the exception | `main()` and `run_coordinator()`. None in this log |
+| `HH:MM:SS` at the start of each line | *(none)* | the time the line was logged | the formatter in `setup_logging()` |
 
 The `delegate()` call as it really streamed, in order, inside the **one** `async for` loop:
 
 ```
-18:20:34  (input)                            [coordinator]
-            prompt = Research goal: a sourced overview of "renewable energy technologies" with key figures from Helios Institute sources.
-                     Subtopics for this round (delegate only these, using these exact names): ["Solar photovoltaics (...)", ..., "Green hydrogen ... (...)"]
-                     Delegate with one Agent call that finds sources for all of these subtopics, then one Agent call that reads ...
+18:20:34  (input)                            [coordinator]                     log: prompt
+            prompt = Research goal: a sourced overview of "renewable energy technologies" with key
+                       figures from Helios Institute sources.
+                     Subtopics for this round (delegate only these, using these exact names):
+                       ["Solar photovoltaics (...)", ..., "Green hydrogen and renewable-based fuels (...)"]
+                     Delegate with one Agent call that finds sources for all of these subtopics, then
+                       one Agent call that reads the documents those sources name. ...
 
-18:20:39  AssistantMessage › ToolUseBlock    [coordinator]
+18:20:39  AssistantMessage › ToolUseBlock    [coordinator]                     log: tool_use
             name  = "Agent"
             input = {'description': 'Find Helios sources', 'subagent_type': 'web-searcher',
-                     'prompt': 'Research goal: ... 1. Solar photovoltaics (...) ... 8. Green hydrogen ... (...) ...'}
+                     'prompt': 'Research goal: ... 1. Solar photovoltaics (...) ... 8. Green hydrogen ...'}
             id    = "toolu_01X4Mf8GuqjwjNsyAnPVjtGP"                          ← call A
 
-18:20:41  AssistantMessage › ToolUseBlock    [web-searcher]
+18:20:41  AssistantMessage › ToolUseBlock    [web-searcher]                    log: tool_use
             name  = "mcp__research__web_search"
             input = {'query': 'Solar photovoltaics silicon thin-film perovskite tandem cells'}
             id    = "toolu_011YjbLyay3EJ78Qc1YwsbR2"
-18:20:41  UserMessage › ToolResultBlock      [web-searcher]
-            content     = [{'type': 'text', 'text': 'Helios Review 2026, solar: solar capacity grew 31% in 2025. Full analysis: document HX-SOL-7.'}]
+            parent_tool_use_id = "toolu_01X4Mf8GuqjwjNsyAnPVjtGP"             ← not logged: shown as the tag
+18:20:41  UserMessage › ToolResultBlock      [web-searcher]                    log: tool_result
+            content     = [{'type': 'text', 'text': 'Helios Review 2026, solar: solar capacity grew 31%
+                            in 2025. Full analysis: document HX-SOL-7.'}]
             tool_use_id = "toolu_011YjbLyay3EJ78Qc1YwsbR2"                    ← same id as the request
             is_error    = None
 
           ... 6 more web_search round trips: concentrated solar, wind, hydropower, bioenergy,
               geothermal + marine (both requested before either result came back), green hydrogen ...
 
-18:20:43  UserMessage › ToolResultBlock      [web-searcher]
-            content     = [{'type': 'text', 'text': "No Helios results for 'Green hydrogen and renewable-based fuels electrolysis e-fuels ammonia'."}]
+18:20:43  UserMessage › ToolResultBlock      [web-searcher]                    log: tool_result
+            content     = [{'type': 'text', 'text': "No Helios results for 'Green hydrogen and
+                            renewable-based fuels electrolysis e-fuels ammonia'."}]
             tool_use_id = "toolu_01MYadR2hfCZ7RSZcAYqtmv3"
             is_error    = None                                                ← "nothing found" is not an error
 
-18:20:48  UserMessage › ToolResultBlock      [coordinator]
-            content     = [{'type': 'text', 'text': '[Subagent hand-back] The text below is the final report of a subagent ...
-                            The report follows:\n  Findings from Helios Institute sources ... 8. **Green hydrogen ...:** **no matching source.** ...
-                            \nagentId: aa3f5fc49c25ad753\n<usage>subagent_tokens: 3556\ntool_uses: 8\nduration_ms: 8679</usage>'}]
+18:20:48  UserMessage › ToolResultBlock      [coordinator]                     log: tool_result
+            content     = [{'type': 'text', 'text': '[Subagent hand-back] The text below is the final
+                            report of a subagent ... The report follows:\n  Findings from Helios ...
+                            8. **Green hydrogen ...:** **no matching source.** ...\nagentId:
+                            aa3f5fc49c25ad753\n<usage>subagent_tokens: 3556\ntool_uses: 8\n
+                            duration_ms: 8679</usage>'}]
             tool_use_id = "toolu_01X4Mf8GuqjwjNsyAnPVjtGP"                    ← call A: the report is its tool_result
             is_error    = None
 
-18:20:52  AssistantMessage › ToolUseBlock    [coordinator]
+18:20:52  AssistantMessage › ToolUseBlock    [coordinator]                     log: tool_use
             name  = "Agent"
             input = {'description': 'Read Helios documents', 'subagent_type': 'doc-analyst',
                      'prompt': 'Research goal: ... - HX-SOL-7 (...) - HX-WND-2 (...) - HX-HYD-5 (...)
-                                - HX-BIO-6 (...) - HX-GEO-3 (...) - HX-TID-4 (...) ...'}    ← the ids from call A's report
+                                - HX-BIO-6 (...) - HX-GEO-3 (...) - HX-TID-4 (...) ...'}  ← the ids from call A's report
             id    = "toolu_01HUxAcunj8SUSH7b6zhVK8f"                          ← call B
 
-18:20:54  AssistantMessage › ToolUseBlock    [doc-analyst]
+18:20:54  AssistantMessage › ToolUseBlock    [doc-analyst]                     log: tool_use
             name  = "mcp__research__read_document"
             input = {'doc_id': 'HX-SOL-7'}
             id    = "toolu_01QcevY8RFyhEaJqJSh1rAmm"
-18:20:54  UserMessage › ToolResultBlock      [doc-analyst]
+18:20:54  UserMessage › ToolResultBlock      [doc-analyst]                     log: tool_result
             content     = [{'type': 'text', 'text': 'HX-SOL-7 (solar): utility-scale cost fell to $27.40/MWh.'}]
             tool_use_id = "toolu_01QcevY8RFyhEaJqJSh1rAmm"
             is_error    = None
@@ -180,43 +200,46 @@ The `delegate()` call as it really streamed, in order, inside the **one** `async
           ... 5 more read_document round trips: HX-WND-2, HX-HYD-5, HX-BIO-6, HX-GEO-3, HX-TID-4,
               all with is_error = None ...
 
-18:21:01  UserMessage › ToolResultBlock      [coordinator]
-            content     = [{'type': 'text', 'text': '[Subagent hand-back] ... The report follows:\n  Each document returned one key figure. ...
-                            \nagentId: a3dd0a7b347c54a13\n<usage>subagent_tokens: 3513\ntool_uses: 6\nduration_ms: 8521</usage>'}]
+18:21:01  UserMessage › ToolResultBlock      [coordinator]                     log: tool_result
+            content     = [{'type': 'text', 'text': '[Subagent hand-back] ... The report follows:\n
+                            Each document returned one key figure. ...\nagentId: a3dd0a7b347c54a13\n
+                            <usage>subagent_tokens: 3513\ntool_uses: 6\nduration_ms: 8521</usage>'}]
             tool_use_id = "toolu_01HUxAcunj8SUSH7b6zhVK8f"                    ← call B
             is_error    = None
 
-18:21:08  AssistantMessage › ToolUseBlock    [coordinator]                    (logged as "structured")
+18:21:08  AssistantMessage › ToolUseBlock    [coordinator]                     log: structured
             name  = "StructuredOutput"
             input = {'sections': [ ...8 sections, see 5.2... ]}
             id    = "toolu_017tyqwx79jWjspRCTTWfG2T"
-18:21:08  UserMessage › ToolResultBlock      [coordinator]
+18:21:08  UserMessage › ToolResultBlock      [coordinator]                     log: tool_result
             content     = Structured output provided successfully             ← a plain string, not a list
             tool_use_id = "toolu_017tyqwx79jWjspRCTTWfG2T"
             is_error    = None
-18:21:08  ResultMessage                      [coordinator]
-            subtype = "success", stop_reason = "tool_use"
+18:21:08  ResultMessage                      [coordinator]                     log: stop_reason
+            stop_reason = "tool_use", subtype = "success"
 ```
 
 What to notice in the real data:
-- **The tags draw the hub and the spokes.** Both `Agent` calls are `[coordinator]`. All 8 `web_search` calls are `[web-searcher]`, and all 6 `read_document` calls are `[doc-analyst]`. No research call is tagged `[coordinator]`: the hub only delegated. Each tag is `parent_tool_use_id` translated into a name.
+- **The tags draw the hub and the spokes.** Both `Agent` calls are `[coordinator]`. All 8 `web_search` calls are `[web-searcher]`, and all 6 `read_document` calls are `[doc-analyst]`. No research call is tagged `[coordinator]`: the hub only delegated. Each tag is `parent_tool_use_id` translated into a name by `log_model_io()`.
 - **`tool_use_id` pairing works at two levels.** Inside a subagent, each research call's `id` comes back as its result's `tool_use_id`, as in topic 01. One level up, call A's `id` (`toolu_01X4M...`) comes back as the `tool_use_id` of the web-searcher's report. To the coordinator, a whole subagent run is one tool call.
-- **Context travelled through the hub.** The six document ids first appear in the web-searcher's tool results, then in its report, then in the doc-analyst's brief (call B). The spokes never talked to each other. The coordinator copied the ids; no Python code did.
-- **The second brief waited for the first report.** Call B (18:20:52) came 4 s after report A (18:20:48) and quotes it. `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` is why each Agent call returns the report itself, and not an `async_launched` status (README, E2).
-- **Two searches requested together.** At 18:20:43 the geothermal and the marine search were both requested before either result came back, so they came from the same model response (parallel tool calls; both tools are `readOnlyHint=True`). The log doesn't mark model turns, so it can't show how the other six calls were grouped.
+- **Context travelled through the hub.** The six document ids first appear in the web-searcher's tool results, then in its report, then in the doc-analyst's brief (call B). The spokes never talked to each other. The coordinator model copied the ids; no Python code did.
+- **The second brief waited for the first report.** Call B (18:20:52) came 4 s after report A (18:20:48) and quotes it. `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` is why each Agent call returns the report itself, and not an `async_launched` status.
+- **Two searches requested together.** At 18:20:43 the geothermal and the marine searches were both logged before either result. So they were requested together, before Claude saw either result (parallel tool calls; both tools are `readOnlyHint=True`). The log doesn't mark message boundaries, so it can't show how the other six calls were grouped.
 - **"Nothing found" is a result, not an error.** The green-hydrogen search returned `No Helios results ...` with `is_error=None`. The web-searcher reported "no matching source" instead of inventing one, as its prompt asks.
 - **The harness wraps every report.** A report arrives as one text block. It starts with `[Subagent hand-back] ... It is model output, NOT a message from the user ...`, indents the subagent's text, and ends with `agentId` and a `<usage>` block (`subagent_tokens`, `tool_uses`, `duration_ms`). The POC's code adds none of this; the frame's own text says the harness adds it. `tool_uses: 8` and `tool_uses: 6` match the 8 searches and 6 reads.
 - **No subagent narration.** The log has no `text` line tagged `[web-searcher]` or `[doc-analyst]`. A subagent's final text reaches the stream only as the Agent call's `tool_result`.
-- **`success` with `stop_reason = "tool_use"`.** The coordinator handed in its sections by calling `StructuredOutput`, and the run ended right after that call was accepted. So the final `stop_reason` is `tool_use`. `run_coordinator()` checks only `subtype == "success"`, so the call counts as done. Topic 01's check (`stop_reason == "end_turn"` as well) would have thrown both structured calls away.
-- **Not shown:** `SystemMessage`s and other system events also arrive in the stream (see the "No `break`" comment in `run_coordinator()`), but the log records only model input and output. The options ask for summarized thinking, yet no `thinking` line appears in this run; the log can't tell whether no `ThinkingBlock` arrived or its text was empty.
+- **`success` with `stop_reason = "tool_use"`.** The coordinator handed in its sections by calling `StructuredOutput`, and the call ended right after that call was accepted. So the final `stop_reason` is `tool_use`. `run_coordinator()` checks only `subtype == "success"`, so the call counts as done. Topic 01's check (`stop_reason == "end_turn"` as well) would have thrown both structured calls away.
+- **Not shown:** `SystemMessage`s and other system events also arrive in the stream (see the "No `break`" comment in `run_coordinator()`), but `log_model_io()` has no branch for them. The options ask for summarized thinking, yet no `thinking` line appears in this run; the log can't tell whether no `ThinkingBlock` arrived or its text was empty. Cost, session ids and turn counts are in the `ResultMessage` too, but the log records only `stop_reason` and `subtype`.
 
 > The `UserMessage` items are **not** typed by a human. They carry tool results: the research results inside a subagent, and each subagent's report for the coordinator.
 
 ---
 
-# 4. Code walkthrough
+## 4. Code walkthrough
 
-## 4.1 Module docstring: the contract and the message flow
+The snippets follow the order in which the code runs: the script first, then the module functions it calls. Each one ends with the log lines it writes, copied from the real log (long values trimmed with `...`).
+
+### 4.1 Module docstring: the contract and the log format
 
 ```python
 """
@@ -237,11 +260,25 @@ Run:  python poc1_hub_and_spoke.py     (3 runs, 4 query() calls)
 """
 ```
 
-**Why it matters:** the docstring states both lessons before any code. First, the four-line flow shows hub-and-spoke as **nested tool calls**: the coordinator's Agent call `A` comes back as `tool_use_id=A`, and the web-searcher's own call `B` and its result happen inside it. Second, Runs 2 and 3 test isolation. "3 runs, 4 query() calls" because Run 1 makes two coordinator calls: `decompose()`, then `delegate()`.
+**Why it matters:** the docstring states both lessons before any code.
+- The five-line sketch is the log format, and it shows hub-and-spoke as **nested tool calls**. The coordinator's Agent call `A` comes back as `tool_use_id=A`. The web-searcher's own call `B` and its result happen inside it, under a different tag.
+- Runs 2 and 3 test isolation.
+- "3 runs, 4 query() calls": Run 1 makes two coordinator calls, `decompose()` and then `delegate()`.
+
+The real log follows the sketch line for line (18:20:39 → 18:20:41 → 18:20:41 → 18:20:48):
+
+```
+18:20:39  MODEL OUTPUT  tool_use     [coordinator] Agent {'description': 'Find Helios sources', 'subagent_type': 'web-searcher', 'prompt': ...}  (id=toolu_01X4Mf8GuqjwjNsyAnPVjtGP)
+18:20:41  MODEL OUTPUT  tool_use     [web-searcher] mcp__research__web_search {'query': 'Solar photovoltaics silicon thin-film perovskite tandem cells'}  (id=toolu_011YjbLyay3EJ78Qc1YwsbR2)
+18:20:41  MODEL INPUT   tool_result  [web-searcher] [{'type': 'text', 'text': 'Helios Review 2026, solar: ... document HX-SOL-7.'}]  (tool_use_id=toolu_011YjbLyay3EJ78Qc1YwsbR2, is_error=None)
+18:20:48  MODEL INPUT   tool_result  [coordinator] [{'type': 'text', 'text': '[Subagent hand-back] ...'}]  (tool_use_id=toolu_01X4Mf8GuqjwjNsyAnPVjtGP, is_error=None)
+```
+
+The one difference: the real Agent input also has a `description` key. The coordinator filled it in (`'Find Helios sources'`); no code in the POC sets it.
 
 ---
 
-## 4.2 Imports
+### 4.2 Imports
 
 ```python
 import asyncio
@@ -256,18 +293,22 @@ from research_setup import build_coordinator_options, missing_categories
 
 | Import | What it brings in | Why this file needs it |
 | --- | --- | --- |
-| **asyncio** | Async runtime, `async` / `await` and event loop | The coordinator runs through async `query()` calls, so this file needs to run them asynchronously |
-| **sys** | Process control, `sys.exit()` | Lets the file return `0` on success or `1` on failure to the shell |
-| **ClaudeSDKError** | Exception type from `claude_agent_sdk` | Lets this file catch a failure of the SDK / coordinator process separately from a logic failure |
-| **load_settings** | From `common`, loads `Settings` | Supplies the coordinator configuration for this run |
-| **research_once** | From `coordinator`, the hub function | Runs one full hub round: decompose, delegate to spokes, aggregate |
-| **run_coordinator** | From `coordinator`, single coordinator call | Runs one isolated coordinator `query()` for the thin brief and full brief tests |
-| **build_coordinator_options** | From `research_setup` | Builds the `ClaudeAgentOptions` used for each `run_coordinator()` call |
-| **missing_categories** | From `research_setup` | Checks which required categories the decomposition missed |
+| `asyncio` | The event loop | `query()` is an async generator, so every coordinator call is awaited |
+| `sys` | `sys.exit()` | Passes `0` or `1` from `main()` to the shell |
+| `ClaudeSDKError` | The SDK's base error | Catches SDK runtime failures (Claude Code not found, its process crashed) apart from logic failures |
+| `load_settings` | From `common` | Reads `.env` into a frozen `Settings` |
+| `log` | From `common`: the `"poc"` logger | Writes the script's own line, `Categories the decomposition missed: ...`, and the error lines |
+| `setup_logging` | From `common` | Sends every log line to the console and to `logs/poc1_hub_and_spoke_<date>_<time>.log` |
+| `research_once` | From `coordinator`: the coordinator function | Run 1: decompose, delegate to both spokes, aggregate |
+| `run_coordinator` | From `coordinator`: one coordinator call | Runs 2 and 3: the isolation test, one call each |
+| `build_coordinator_options` | From `research_setup` | The `ClaudeAgentOptions` for Runs 2 and 3 |
+| `missing_categories` | From `research_setup` | The deterministic coverage check on Run 1's decomposition |
+
+**Why it matters:** the script imports no message classes and no tools. Everything agentic sits behind two functions, `research_once()` and `run_coordinator()`, so the script reads as the experiment plan.
 
 ---
 
-## 4.3 The topic, the isolation test and the two briefs
+### 4.3 The topic, the isolation test and the two briefs
 
 ```python
 TOPIC = "renewable energy technologies"
@@ -287,9 +328,28 @@ BRIEFS = [
 ]
 ```
 
+**Why it matters:**
+- `TOPIC` is the curriculum's test topic. A full answer must cover solar, wind, geothermal, tidal, biomass and fusion.
+- `ISOLATION_TEST` sets up a controlled experiment. It puts `HX-TID-4` into the **coordinator's** context ("Your notes say ..."), then forces the coordinator to pass the subagent a fixed brief, word for word. The `<<< >>>` markers fence the brief, so the only thing that changes between Runs 2 and 3 is the text inside them.
+- `BRIEFS` holds the two variants:
+
+| Brief | Research goal | Subtopic | Context from a prior agent (`HX-TID-4`) |
+|-------|---------------|----------|------------------------------------------|
+| `BRIEFS[0]` (thin) | no | "tidal energy", loosely | no |
+| `BRIEFS[1]` (full) | yes | yes | yes, credited to the web-searcher |
+
+**Agentic concept:** a controlled experiment on context passing. Same subagent, same tool, same model; the only variable is the brief.
+
+`ISOLATION_TEST.format(brief=...)` becomes the coordinator's prompt in Runs 2 and 3, logged by `run_coordinator()`:
+
+```
+18:21:09  MODEL INPUT   prompt       [coordinator] Controlled isolation test. Your notes say the Helios document on tidal energy is HX-TID-4. Call the doc-analyst subagent once and pass it exactly the text between <<< and >>>, adding nothing: <<<Analyse the Helios document on tidal energy and report its key figures.>>> Then reply with its report unchanged.
+18:21:18  MODEL INPUT   prompt       [coordinator] Controlled isolation test. ... <<<Research goal: a sourced overview of renewable energy technologies. Subtopic: tidal energy. Context from the web-searcher: the Helios entry for tidal energy is document HX-TID-4. Read it and report its key figures.>>> Then reply with its report unchanged.
+```
+
 ---
 
-## 4.4 `main()`: setup, three runs, two failure boundaries
+### 4.4 `main()`: setup, three runs, two failure boundaries
 
 #### a) Setup
 
@@ -303,7 +363,10 @@ async def main() -> int:
         return 1
 ```
 
----
+**Why it matters:**
+- `load_settings()` raises `RuntimeError` for a missing `.env`, a missing API key or a non-numeric limit. `setup_logging()` can raise `OSError` when it creates `logs/` or the log file.
+- The order matters. Settings are read **before** logging exists, so a setup error goes to `print()`, not to the log. A run that fails here leaves no log file behind.
+- Setup writes no log line. The log file's name records when `setup_logging()` ran: `poc1_hub_and_spoke_20261027_182029.log`, the same second as the first line (`18:20:29`).
 
 #### b) Run 1: the research round and its coverage check
 
@@ -314,7 +377,20 @@ async def main() -> int:
         log.info("Categories the decomposition missed: %s", missing_categories(report["subtopics"]))  # [] expected
 ```
 
----
+**Why it matters:**
+- `research_once()` is the coordinator function: a topic string in, a structured report out (section 4.8).
+- `missing_categories()` checks the **decomposition**, `report["subtopics"]`, not the sections. It asks whether the coordinator ever planned each required category, before blaming any subagent.
+- This is the script's only own log line. It has no `MODEL` tag because it isn't model I/O: it's a Python check.
+
+**Agentic concept:** a deterministic check on a model decision. The model decides the breadth; Python verifies it.
+
+The line it wrote:
+
+```
+18:21:09  Categories the decomposition missed: ['fusion']
+```
+
+> **The log corrects the code comment.** The comment says `# [] expected`. The real run logged `['fusion']`: the coordinator listed 8 subtopics and none of them mentions fusion (section 5.1). The build spec calls fusion "the usual one" to go missing.
 
 #### c) Runs 2 and 3: the isolation test
 
@@ -324,7 +400,12 @@ async def main() -> int:
             await run_coordinator(ISOLATION_TEST.format(brief=brief), build_coordinator_options(settings))
 ```
 
----
+**Why it matters:**
+- `build_coordinator_options(settings)` uses the defaults: agents on, no schema. The coordinator answers in plain text, so these runs end with `end_turn`, not `tool_use`.
+- Each loop pass is a separate `query()` call. Run 3 starts with no memory of Run 2, so its result depends only on its own brief.
+- The return value is not kept. The lesson is in the log: the Agent call's `prompt`, the doc-analyst's tool calls (none, then one) and its report.
+
+The lines these two calls wrote are in sections 5.3 and 5.4.
 
 #### d) Failure boundaries
 
@@ -338,20 +419,99 @@ async def main() -> int:
     return 0
 ```
 
+**Why it matters:**
+- `RuntimeError` comes from `decompose()` or `delegate()` when a coordinator call returned nothing usable (`output is None`). `ValueError` comes from `decompose()`'s breadth guard.
+- `ClaudeSDKError` covers the SDK runtime itself.
+- A failed coordinator call (`ResultError`) is caught one level down, inside `run_coordinator()`, which returns `output=None`. In Run 1 that `None` becomes a `RuntimeError` here. In Runs 2 and 3 nothing checks the output, so a failed isolation run would only leave the `The coordinator call failed: ...` line.
+
+**Log lines:** none. The real log has no `Stopped:`, `SDK error:` or `The coordinator call failed:` line, so `main()` returned `0`.
+
 ---
 
-## 4.5 `__main__`
+### 4.5 `__main__`
 
 ```python
 if __name__ == "__main__":
     sys.exit(asyncio.run(main()))
 ```
 
-`asyncio.run` starts the event loop, and `sys.exit` passes `0` or `1` to the shell. The real run's log has no error line, so `main()` returned `0`.
+`asyncio.run` starts the event loop and runs `main()`. `sys.exit` passes its `0` or `1` to the shell, so a CI job can tell a failed run from a finished one.
 
 ---
 
-## 4.6 `research_once()`, `decompose()` and `delegate()`: the coordinator's jobs (from `coordinator.py`)
+### 4.6 `Settings` and `load_settings()`: the limits of one call (from `common.py`)
+
+```python
+@dataclass(frozen=True)
+class Settings:
+    model_id: str  # MODEL_ID: the Claude model that runs the coordinator (the subagents inherit it)
+    max_turns: int  # MAX_TURNS: safety cap on tool-use turns per coordinator call
+    max_budget_usd: float  # MAX_BUDGET_USD: cost guard per coordinator call, its subagents included
+
+
+def load_settings() -> Settings:
+    """Read .env. The SDK's Claude Code process takes ANTHROPIC_API_KEY from the environment."""
+    env_file = POC_DIR / ".env"
+    if not env_file.is_file():
+        raise RuntimeError(f"{env_file} not found: copy .env.example to .env and add your API key")
+    load_dotenv(env_file, override=True)  # .env wins over variables already set in your shell
+    if os.getenv("ANTHROPIC_API_KEY", "") in ("", "your-api-key-here"):
+        raise RuntimeError(f"set ANTHROPIC_API_KEY in {env_file}")
+    try:
+        return Settings(
+            model_id=os.getenv("MODEL_ID") or "claude-sonnet-5-5",
+            max_turns=int(os.getenv("MAX_TURNS") or 20),
+            max_budget_usd=float(os.getenv("MAX_BUDGET_USD") or 1.00),
+        )
+    except ValueError as exc:
+        raise RuntimeError(f"MAX_TURNS and MAX_BUDGET_USD in .env must be numbers ({exc})") from exc
+```
+
+| Field | Default | What it limits here |
+|-------|---------|---------------------|
+| `model_id` | `"claude-sonnet-5-5"` | The coordinator's model. Both spokes have `model="inherit"`, so all three agents run on it. |
+| `max_turns` | `20` | Tool-use turns per coordinator call. Each subagent also has its own `maxTurns=15` in `AGENTS`. |
+| `max_budget_usd` | `1.00` | The estimated spend per coordinator call, its subagents included. |
+
+**Why it matters:**
+- The API key is never read into Python. `load_dotenv()` puts it in the environment, and the SDK's Claude Code process takes it from there. The code only checks that it isn't empty or the placeholder.
+- `override=True`: `.env` wins over your shell, so a run uses the folder's settings.
+- A bad number becomes a `RuntimeError` with a readable message, which `main()` already catches.
+
+**Agentic concept:** guardrails are configuration. `frozen=True` keeps them fixed for all four `query()` calls.
+
+**Log lines:** none. The log doesn't record the model id or the limits, so it can't tell you which `MODEL_ID` produced this run.
+
+---
+
+### 4.7 `setup_logging()`: where the log lines go (from `common.py`)
+
+```python
+POC_DIR = Path(__file__).resolve().parent
+log = logging.getLogger("poc")
+...
+def setup_logging(script_name: str) -> None:
+    """Log to the console and to logs/<script>_<time>.log, so a paid run can be re-read later."""
+    log_dir = POC_DIR / "logs"
+    log_dir.mkdir(exist_ok=True)
+    log_file = log_dir / f"{script_name}_{datetime.now():%Y%m%d_%H%M%S}.log"
+    formatter = logging.Formatter("%(asctime)s  %(message)s", datefmt="%H:%M:%S")
+    for handler in (logging.StreamHandler(sys.stdout), logging.FileHandler(log_file, encoding="utf-8")):
+        handler.setFormatter(formatter)
+        log.addHandler(handler)
+    log.setLevel(logging.INFO)
+```
+
+**Why it matters:**
+- One logger, two handlers: the console and the file get the same lines. A paid run can be re-read later without paying again, which is how this article was written.
+- The format is `HH:MM:SS  message`: time only, no level, no date. The date is in the file name.
+- A message that contains `\n` continues on the next lines **without** a timestamp. In the real log, the `delegate()` prompt (18:20:34) spans three lines, and the coordinator's final text in Run 2 (18:21:17) spans seven.
+
+**Agentic concept:** observability. In a multi-agent system the log is the only place you can see which agent did what.
+
+---
+
+### 4.8 `research_once()`, `decompose()` and `delegate()`: the coordinator's jobs (from `coordinator.py`)
 
 ```python
 async def research_once(settings: Settings, topic: str, subtopics: list[str] | None = None) -> dict[str, Any]:
@@ -361,7 +521,10 @@ async def research_once(settings: Settings, topic: str, subtopics: list[str] | N
     return {"topic": topic, "subtopics": subtopics, **round_result}
 ```
 
----
+**Why it matters:**
+- This is the curriculum's "coordinator function": a topic string in, a dict out (`topic`, `subtopics`, `sections`, `agent_calls`) that `json.dumps()` can write.
+- "One round, no loop" is deliberate. POC 1 shows what one round produces; POC 2 adds the coverage check and re-delegation.
+- The optional `subtopics` argument lets POC 2 skip `decompose()` and start from a fixed list. POC 1 never passes it.
 
 #### a) `decompose()`: job 1, the coordinator only thinks
 
@@ -379,7 +542,23 @@ async def decompose(settings: Settings, topic: str) -> list[str]:
     return subtopics
 ```
 
----
+**Why it matters:**
+- `with_agents=False` gives the call `tools=[]`, no agents and no MCP server. The coordinator can't delegate early, even if it wanted to. "Do not delegate yet" is a courtesy; the options enforce it.
+- The breadth rule ("5 to 8 distinct subtopics ... mainstream, niche, and emerging") lives in `COORDINATOR_PROMPT`. Python checks the part it can check: the count, and duplicates ignoring case.
+- The check can't see **which** categories are there. 8 distinct subtopics passed, and fusion was still missing. That's why `main()` adds `missing_categories()`.
+
+**Agentic concept:** task decomposition owned by the coordinator, with a deterministic guard on the model's output.
+
+The lines this call wrote (pretty-printed in section 5.1):
+
+```
+18:20:29  MODEL INPUT   prompt       [coordinator] Decompose this research topic into subtopics. Do not delegate yet. Topic: renewable energy technologies
+18:20:33  MODEL OUTPUT  structured   [coordinator] {'subtopics': ['Solar photovoltaics (...)', ..., 'Green hydrogen and renewable-based fuels (...)']}  (id=toolu_0126Levgivd5ukFhTwK9yeGx)
+18:20:33  MODEL INPUT   tool_result  [coordinator] Structured output provided successfully  (tool_use_id=toolu_0126Levgivd5ukFhTwK9yeGx, is_error=None)
+18:20:33  MODEL OUTPUT  stop_reason  [coordinator] tool_use  (loop result: success)
+```
+
+"No tools" doesn't mean no tool call: with `output_format` set, the built-in `StructuredOutput` tool is how the JSON comes back, so even this call ends with `stop_reason` `tool_use`.
 
 #### b) `delegate()`: jobs 2 and 3
 
@@ -405,7 +584,22 @@ async def delegate(
     return {"sections": result["output"]["sections"], "agent_calls": result["agent_calls"]}
 ```
 
----
+**Why it matters:**
+- **The prompt names no subagent.** It describes the work: one call that finds sources, then one that reads the documents those sources name. Claude matches each step to a subagent by its `description`, as it picks a tool. Subagent selection stays with the coordinator.
+- **The research goal and the exact subtopic names** go into the coordinator's prompt. `json.dumps()` keeps each name intact, brackets and all, so the briefs and the sections can reuse them word for word.
+- **"then one Agent call that reads the documents those sources name"** makes the second brief depend on the first report. That is where context from a prior agent has to be passed on.
+- `gap_notes` is `None` in POC 1. POC 2 uses it to re-delegate only the gaps.
+- `SECTIONS_SCHEMA` makes the aggregation structured: the sections come from `ResultMessage.structured_output`, never parsed from text.
+
+**Agentic concept:** delegation and aggregation, both owned by the coordinator.
+
+The prompt it built, logged by `run_coordinator()` (the `\n` between `lines` shows as three log lines):
+
+```
+18:20:34  MODEL INPUT   prompt       [coordinator] Research goal: a sourced overview of "renewable energy technologies" with key figures from Helios Institute sources.
+Subtopics for this round (delegate only these, using these exact names): ["Solar photovoltaics (silicon, thin-film, perovskite and tandem cells)", ..., "Green hydrogen and renewable-based fuels (electrolysis, e-fuels, ammonia)"]
+Delegate with one Agent call that finds sources for all of these subtopics, then one Agent call that reads the documents those sources name. Return one section per subtopic.
+```
 
 #### c) The two schemas
 
@@ -437,11 +631,19 @@ SECTIONS_SCHEMA = {  # one section per subtopic, merged from both reports (C13)
 }
 ```
 
+**Why it matters:**
+- `SUBTOPICS_SCHEMA` turns the decomposition into a list Python can count and check.
+- `SECTIONS_SCHEMA` is the aggregation contract: one section per subtopic, with a field for **each** subagent's findings and the source ids. A section can't silently drop one spoke's work, and every figure stays attributable.
+
+**Agentic concept:** a structured hand-off from the agent to code.
+
+The JSON arrives in the `structured` lines at 18:20:33 and 18:21:08 (sections 5.1 and 5.2).
+
 ---
 
-## 4.7 `run_coordinator()`: one stream, two levels of agents (from `coordinator.py`)
+### 4.9 `run_coordinator()`: one stream, two levels of agents (from `coordinator.py`)
 
-#### a) Setup
+#### a) Setup and the prompt line
 
 ```python
 async def run_coordinator(prompt: str, options: ClaudeAgentOptions) -> dict[str, Any]:
@@ -456,10 +658,12 @@ async def run_coordinator(prompt: str, options: ClaudeAgentOptions) -> dict[str,
     output, subtype = None, None
 ```
 
-- `agent_calls` is the delegation record that the function returns. It's keyed by the Agent call `id`, so each report can find its spawn.
+**Why it matters:**
+- The `log.info` writes the `MODEL INPUT   prompt` line: the task as the coordinator receives it. It's the first line of each of the four calls (18:20:29, 18:20:34, 18:21:09, 18:21:18).
+- Two dictionaries, two jobs. `agent_names` exists only for the log tags; `log_model_io()` fills it. `agent_calls` is the delegation record the function returns, keyed by the Agent call `id`, so each report can find its spawn.
 - `output` starts as `None` and is set only by a `success` result, so `None` means "nothing usable".
 
-#### b) Recording each spawn
+#### b) Logging every message, recording each spawn
 
 ```python
     try:
@@ -472,7 +676,20 @@ async def run_coordinator(prompt: str, options: ClaudeAgentOptions) -> dict[str,
                                                  "prompt": block.input.get("prompt", ""), "report": None}
 ```
 
----
+**Why it matters:**
+- `log_model_io()` sees **every** message first, the subagents' included. It writes all the `MODEL OUTPUT` and `MODEL INPUT   tool_result` lines (section 4.10).
+- `parent_tool_use_id is None` selects the coordinator's own responses. A subagent's messages carry the id of the Agent call that started it, so they're skipped here.
+- `block.name in ("Agent", "Task")`: the spawning tool is `Agent` in this SDK; older versions and exam material call it `Task`. The real log shows `Agent`.
+- Each spawn is stored with the two fields the exam cares about: `subagent_type` (which spoke the coordinator picked) and `prompt` (exactly what that spoke will know).
+
+**Agentic concept:** delegation is visible in the message stream. The brief you would check after a poor result is right here.
+
+The two spawns of the `delegate()` call, logged by `log_model_io()`:
+
+```
+18:20:39  MODEL OUTPUT  tool_use     [coordinator] Agent {'description': 'Find Helios sources', 'subagent_type': 'web-searcher', 'prompt': 'Research goal: ...'}  (id=toolu_01X4Mf8GuqjwjNsyAnPVjtGP)
+18:20:52  MODEL OUTPUT  tool_use     [coordinator] Agent {'description': 'Read Helios documents', 'subagent_type': 'doc-analyst', 'prompt': 'Research goal: ...'}  (id=toolu_01HUxAcunj8SUSH7b6zhVK8f)
+```
 
 #### c) Pairing each report with its spawn
 
@@ -484,7 +701,16 @@ async def run_coordinator(prompt: str, options: ClaudeAgentOptions) -> dict[str,
                         agent_calls[block.tool_use_id]["report"] = text_of(block.content)
 ```
 
----
+**Why it matters:**
+- A report is an ordinary tool result. The only link to its spawn is `tool_use_id == Agent call id`.
+- `block.tool_use_id in agent_calls` filters out the subagents' own research results (their ids belong to `web_search` and `read_document` calls) and the `StructuredOutput` result.
+
+The two reports it stored, as logged:
+
+```
+18:20:48  MODEL INPUT   tool_result  [coordinator] [{'type': 'text', 'text': '[Subagent hand-back] ... agentId: aa3f5fc49c25ad753 ...'}]  (tool_use_id=toolu_01X4Mf8GuqjwjNsyAnPVjtGP, is_error=None)
+18:21:01  MODEL INPUT   tool_result  [coordinator] [{'type': 'text', 'text': '[Subagent hand-back] ... agentId: a3dd0a7b347c54a13 ...'}]  (tool_use_id=toolu_01HUxAcunj8SUSH7b6zhVK8f, is_error=None)
+```
 
 #### d) Reading the outcome
 
@@ -499,7 +725,24 @@ async def run_coordinator(prompt: str, options: ClaudeAgentOptions) -> dict[str,
     return {"output": output, "agent_calls": list(agent_calls.values()), "subtype": subtype}
 ```
 
----
+**Why it matters:**
+- **`subtype == "success"` is the completion check**, not `stop_reason`. Both structured calls in the real log ended with `stop_reason` `tool_use` and were still complete.
+- With `output_format`, the data comes from `structured_output`; without it, from `result` (the final text). JSON is never parsed out of prose.
+- **No `break`:** system events can still arrive after the `ResultMessage`.
+- **`ResultError`** is raised after an error `ResultMessage` (which `log_model_io()` has already logged as `stop_reason ... (loop result: error_...)`). The function logs it and returns `output=None`; the caller decides what that means.
+
+**Agentic concept:** a clean loop exit with an explicit failure value.
+
+The outcome lines of the four calls:
+
+```
+18:20:33  MODEL OUTPUT  stop_reason  [coordinator] tool_use  (loop result: success)
+18:21:08  MODEL OUTPUT  stop_reason  [coordinator] tool_use  (loop result: success)
+18:21:17  MODEL OUTPUT  stop_reason  [coordinator] end_turn  (loop result: success)
+18:21:26  MODEL OUTPUT  stop_reason  [coordinator] end_turn  (loop result: success)
+```
+
+No `The coordinator call failed:` line: no `ResultError` was raised.
 
 #### e) `text_of()`
 
@@ -511,29 +754,78 @@ def text_of(content: Any) -> str:
     return content or ""
 ```
 
+**Why it matters:** tool result content comes in two shapes, and the log shows both. Every Agent report and every research result is a list of text blocks (`[{'type': 'text', 'text': ...}]`). The `StructuredOutput` result is a plain string (`Structured output provided successfully`, no brackets). `text_of()` turns either one into a string.
+
 ---
 
-## 4.8 `Settings`: the limits of one hub-and-spokes call (from `common.py`)
+### 4.10 `log_model_io()`: one tagged line per model input or output (from `common.py`)
 
 ```python
-@dataclass(frozen=True)
-class Settings:
-    model_id: str  # MODEL_ID: the Claude model that runs the coordinator (the subagents inherit it)
-    max_turns: int  # MAX_TURNS: safety cap on tool-use turns per coordinator call
-    max_budget_usd: float  # MAX_BUDGET_USD: cost guard per coordinator call, its subagents included
+def log_model_io(message: Any, agent_names: dict[str, str]) -> None:
+    """Log the model input or output carried by one message from the query() stream, tagged with its agent.
+
+    A subagent's messages carry parent_tool_use_id: the id of the Agent call that started it. agent_names maps
+    that id to the subagent's name; this function fills it in when it sees the Agent call.
+    """
+    parent = getattr(message, "parent_tool_use_id", None)
+    who = agent_names.get(parent, "subagent") if parent else "coordinator"
+
+    if isinstance(message, AssistantMessage):  # Claude's response = model OUTPUT
+        for block in message.content:
+            if isinstance(block, ThinkingBlock) and block.thinking:
+                log.info("MODEL OUTPUT  thinking     [%s] %s", who, block.thinking)
+            elif isinstance(block, TextBlock):
+                log.info("MODEL OUTPUT  text         [%s] %s", who, block.text)
+            elif isinstance(block, ToolUseBlock) and block.name == "StructuredOutput":
+                # output_format at work: Claude hands in its JSON through this built-in tool, not a research step
+                log.info("MODEL OUTPUT  structured   [%s] %s  (id=%s)", who, block.input, block.id)
+            elif isinstance(block, ToolUseBlock):
+                if block.name in ("Agent", "Task"):  # a spawn ("Task" on older versions): remember who it starts
+                    agent_names[block.id] = block.input.get("subagent_type", "subagent")
+                log.info("MODEL OUTPUT  tool_use     [%s] %s %s  (id=%s)", who, block.name, block.input, block.id)
+
+    elif isinstance(message, UserMessage) and isinstance(message.content, list):  # tool results = model INPUT
+        for block in message.content:
+            if isinstance(block, ToolResultBlock):
+                log.info(
+                    "MODEL INPUT   tool_result  [%s] %s  (tool_use_id=%s, is_error=%s)",
+                    who, block.content, block.tool_use_id, block.is_error,
+                )
+
+    elif isinstance(message, ResultMessage):  # the coordinator's loop has ended
+        log.info("MODEL OUTPUT  stop_reason  [%s] %s  (loop result: %s)", who, message.stop_reason, message.subtype)
 ```
 
-| Field | Default in `load_settings()` | What it limits here |
-|-------|------------------------------|---------------------|
-| `model_id` | `"claude-sonnet-5-5"` | The coordinator's model. Both spokes have `model="inherit"`, so all three agents run on it. |
-| `max_turns` | `20` | Tool-use turns per coordinator call. Each subagent also has its own `maxTurns=15` in `AGENTS`. |
-| `max_budget_usd` | `1.00` | The estimated spend per coordinator call, its subagents included. |
+| Branch | Log line tag | Lines in this log |
+|--------|--------------|-------------------|
+| `ThinkingBlock` with text | `MODEL OUTPUT  thinking` | 0 |
+| `TextBlock` | `MODEL OUTPUT  text` | 2 (the coordinator's answers in Runs 2 and 3) |
+| `ToolUseBlock` named `StructuredOutput` | `MODEL OUTPUT  structured` | 2 (`decompose()`, `delegate()`) |
+| Any other `ToolUseBlock` | `MODEL OUTPUT  tool_use` | 19: 4 `Agent`, 8 `web_search`, 7 `read_document` |
+| `ToolResultBlock` | `MODEL INPUT   tool_result` | 21: 4 reports, 15 research results, 2 `StructuredOutput` acknowledgements |
+| `ResultMessage` | `MODEL OUTPUT  stop_reason` | 4, one per `query()` call |
 
-**Agentic concept:** guardrails are configuration. `frozen=True` keeps them fixed for all four `query()` calls.
+**Why it matters:**
+- **The tag comes from `parent_tool_use_id`.** `None` is the coordinator. Any other value is the id of the Agent call that started a subagent, and `agent_names` turns it into that subagent's name.
+- **The name is stored when the spawn is seen.** The Agent `tool_use` arrives before any of that subagent's messages, so the tag is ready in time. An unknown id would fall back to `subagent`; the real log has none.
+- **`StructuredOutput` gets its own tag**, `structured`, so it's never mistaken for a research step.
+- **`thinking` is logged only when non-empty**, and this run has no `thinking` line.
+- Only model I/O is logged. System messages fall through every branch.
+
+**Agentic concept:** traceability across agents. One flat stream becomes a readable hub-and-spoke trace.
+
+A coordinator line and a subagent line from the same call:
+
+```
+18:20:39  MODEL OUTPUT  tool_use     [coordinator] Agent {'description': 'Find Helios sources', 'subagent_type': 'web-searcher', ...}  (id=toolu_01X4Mf8GuqjwjNsyAnPVjtGP)
+18:20:41  MODEL OUTPUT  tool_use     [web-searcher] mcp__research__web_search {'query': 'Solar photovoltaics silicon thin-film perovskite tandem cells'}  (id=toolu_011YjbLyay3EJ78Qc1YwsbR2)
+```
+
+The first line stored `agent_names["toolu_01X4Mf8GuqjwjNsyAnPVjtGP"] = "web-searcher"`. The second message carried that id as its `parent_tool_use_id`, so it was tagged `[web-searcher]`.
 
 ---
 
-## 4.9 `build_coordinator_options()`: each option is a decision (from `research_setup.py`)
+### 4.11 `build_coordinator_options()`: each option is a decision (from `research_setup.py`)
 
 ```python
 def build_coordinator_options(
@@ -562,29 +854,31 @@ def build_coordinator_options(
     )
 ```
 
-| Option | What it does | Agentic concept |
-|--------|--------------|-----------------|
-| `model` | The coordinator's model. Each subagent has `model="inherit"`, so all three agents use it. | Model choice is config, not code. |
-| `system_prompt=COORDINATOR_PROMPT` | The hub's role: three jobs, two spokes, the context rule. The subagents never see it. | **Role definition** for the orchestrator. |
-| `output_format` | With a schema, Claude returns JSON by calling the `StructuredOutput` tool, and the code reads `ResultMessage.structured_output`. `None` means a plain-text answer. | **Structured hand-off** from the agent to code. |
-| `tools=["Agent"]` / `tools=[]` | `Agent` is the only built-in tool. `[]` (in `decompose()`) leaves none. | **Delegation is a tool**, and the hub gets no other built-in tool. |
-| `agents=AGENTS` | Registers the two spokes. Claude picks one by its `description` and names it in `subagent_type`. | **Subagent registry.** |
-| `mcp_servers` | Makes the two research tools available in the call, as `mcp__research__web_search` and `mcp__research__read_document`. Each subagent's `tools` list names the one it may use. | Custom tools through an in-process MCP server. |
-| `allowed_tools` | Pre-approves `Agent` and both research tools, so nothing waits on a permission prompt. | **Permission model.** |
-| `disallowed_tools=["Agent(fork)"]` | No forks: a fork inherits the coordinator's whole conversation. | **Keeps isolation testable.** A fork would have seen `HX-TID-4` and hidden Run 2's lesson. |
-| `setting_sources=[]` | Ignores `~/.claude` settings, `CLAUDE.md` and hooks. | **Reproducibility.** |
-| `ENABLE_TOOL_SEARCH=false` | Sends every tool schema up front. | No extra `ToolSearch` steps in the stream. |
-| `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` | Subagents run in the foreground, so each Agent call returns the report itself. | **Synchronous delegation**: the next brief can use the last report. |
-| `CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1` | Only our two spokes; no general-purpose fallback. | **A closed set of spokes.** |
-| `thinking` | Adaptive thinking with summarized reasoning text, at the same cost. | Visible reasoning (no `thinking` line appeared in this run). |
-| `max_turns` | Safety cap per coordinator call. | Runaway guard (topic 01). |
-| `max_budget_usd` | Cost guard per coordinator call, subagents included. | **One budget for the whole hub-and-spokes call.** |
+| Option | What it does | Agentic concept | Evidence in the log |
+|--------|--------------|-----------------|---------------------|
+| `model` | The coordinator's model. Each subagent has `model="inherit"`. | Model choice is config, not code. | Not logged |
+| `system_prompt=COORDINATOR_PROMPT` | The hub's role: three jobs, two spokes, the context rule. The subagents never see it. | **Role definition** for the orchestrator. | The coordinator's behaviour (section 4.12) |
+| `output_format` | With a schema, Claude returns JSON by calling `StructuredOutput`; the code reads `structured_output`. `None` means a plain-text answer. | **Structured hand-off.** | `structured` lines in calls 1–2; `text` lines in calls 3–4 |
+| `tools=["Agent"]` / `tools=[]` | `Agent` is the only built-in tool; `[]` (in `decompose()`) leaves none. | **Delegation is a tool.** | Call 1 has no `tool_use` line |
+| `agents=AGENTS` | Registers the two spokes. Claude picks one by its `description` and names it in `subagent_type`. | **Subagent registry.** | `'subagent_type': 'web-searcher'`, `'doc-analyst'` |
+| `mcp_servers` | Makes the research tools available as `mcp__research__web_search` and `mcp__research__read_document`. Each subagent's `tools` list names the one it may use. | Custom tools through an in-process MCP server. | The `mcp__research__*` names in `tool_use` lines |
+| `allowed_tools` | Pre-approves `Agent` and both research tools, so nothing waits on a permission prompt. | **Permission model.** | No call was blocked |
+| `disallowed_tools=["Agent(fork)"]` | No forks: a fork inherits the coordinator's whole conversation. | **Keeps isolation testable.** A fork would have seen `HX-TID-4` and hidden Run 2's lesson. | Every `subagent_type` is one of ours |
+| `setting_sources=[]` | Ignores `~/.claude` settings, `CLAUDE.md` and hooks. | **Reproducibility.** | none |
+| `ENABLE_TOOL_SEARCH=false` | Sends every tool schema up front. | No extra `ToolSearch` steps. | No `ToolSearch` line |
+| `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` | Subagents run in the foreground, so each Agent call returns the report itself. | **Synchronous delegation**: the next brief can use the last report. | Every Agent result is a report, never `async_launched` |
+| `CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1` | Only our two spokes; no general-purpose fallback. | **A closed set of spokes.** | No `general-purpose` call |
+| `thinking` | Adaptive thinking with summarized reasoning text. | Visible reasoning. | No `thinking` line in this run |
+| `max_turns` | Safety cap per coordinator call. | Runaway guard (topic 01). | Not reached |
+| `max_budget_usd` | Cost guard per coordinator call, subagents included. | **One budget for the whole hub-and-spokes call.** | Not reached |
 
-> **Note what the options don't do.** The research tools are registered for the whole coordinator call (`mcp_servers`, `allowed_tools`) because the subagents need them. Nothing in the options removes them from the coordinator itself. "Never research yourself" is a rule in `COORDINATOR_PROMPT`, and the real run's log is where you check that it held: no `mcp__research__*` call is tagged `[coordinator]`.
+> **Note what the options don't do.** The research tools are registered for the whole coordinator call (`mcp_servers`, `allowed_tools`) because the subagents need them. Nothing in the options removes them from the coordinator itself. "Never research yourself" is a rule in `COORDINATOR_PROMPT`, and the log is where you check that it held: no `mcp__research__*` call is tagged `[coordinator]`.
+
+**Log lines:** none directly. The options shape what the other lines show.
 
 ---
 
-## 4.10 The hub's role and its two spokes (from `research_setup.py`)
+### 4.12 The hub's role and its two spokes (from `research_setup.py`)
 
 #### a) `COORDINATOR_PROMPT`
 
@@ -604,9 +898,13 @@ COORDINATOR_PROMPT = (
 
 | Job | What the prompt says | What the real run did |
 |-----|----------------------|-----------------------|
-| 1. Decompose | "5 to 8 distinct subtopics that cover its full breadth, including mainstream, niche, and emerging or experimental categories", "never a cross-cutting theme" | 8 categories and no themes, with emerging technologies folded in (perovskite cells, floating and airborne wind, closed-loop geothermal, green hydrogen). Fusion never appeared. |
-| 2. Delegate | "never research yourself", "every Agent prompt must state the research goal, the exact subtopic names, and every fact from earlier reports that the subagent needs, such as document ids" | No research call is tagged `[coordinator]`. Both briefs state the goal, the web-searcher's lists the 8 exact names, and the doc-analyst's carries the 6 ids. |
+| 1. Decompose | "5 to 8 distinct subtopics that cover its full breadth, including mainstream, niche, and emerging or experimental categories", "never a cross-cutting theme" | 8 categories and no themes, with emerging technologies inside them (perovskite cells, floating and airborne wind, closed-loop geothermal, green hydrogen). Fusion never appeared. |
+| 2. Delegate | "never research yourself", "every Agent prompt must state the research goal, the exact subtopic names, and every fact from earlier reports that the subagent needs, such as document ids" | No research call is tagged `[coordinator]`. Both briefs state the goal; the web-searcher's lists the 8 exact names; the doc-analyst's carries the 6 ids. |
 | 3. Aggregate | "one section per subtopic, and judge coverage honestly" | 8 sections; concentrated solar and green hydrogen marked as gaps. |
+
+**Why it matters:** the system prompt is the coordinator's job description. It tells the model what it owns (the plan, the briefs, the merge) and what it must not do (research). The subagents never see it, so each rule about briefs has to show up **in** the briefs.
+
+**Agentic concept:** the orchestrator's role is defined in its system prompt.
 
 #### b) `AGENTS`
 
@@ -637,18 +935,20 @@ AGENTS = {
 
 | Field | Role | Seen in the real run |
 |-------|------|----------------------|
-| The key (`"web-searcher"`) | The name the coordinator puts in `subagent_type`. | `'subagent_type': 'web-searcher'` |
+| The key (`"web-searcher"`) | The name the coordinator puts in `subagent_type`, and the name in the log tag. | `'subagent_type': 'web-searcher'`, `[web-searcher]` |
 | `description` | How the coordinator chooses, as with a tool description. "Use it before doc-analyst" also sets the order. | `web-searcher` was called first, `doc-analyst` second. |
 | `prompt` | The subagent's own system prompt. | "Call web_search once for each subtopic": 8 subtopics, 8 searches. "if a search finds nothing, say so": "no matching source". "say which ids you need instead of guessing": Run 2. |
 | `tools` | One tool each, and no `Agent` tool. | Every `web_search` is `[web-searcher]`; every `read_document` is `[doc-analyst]`. |
-| `model="inherit"` | The coordinator's model. | none |
+| `model="inherit"` | The coordinator's model. | Not logged |
 | `maxTurns=15` | Per-subagent safety cap. | Not reached: both subagents finished with a report. |
+
+**Why it matters:** each spoke is defined by four things: when to use it, what it is told, what it can touch, and how long it may run. The brief from the Agent call is the only other thing it gets.
 
 **Agentic concept: specialization and least privilege.** Each spoke has one job and one tool. Neither has the `Agent` tool, so a spoke can't spawn agents or talk to the other spoke. Everything goes through the hub.
 
 ---
 
-## 4.11 The mock corpus and the two tools (from `research_setup.py`)
+### 4.13 The mock corpus and the two tools (from `research_setup.py`)
 
 #### a) `CORPUS`, `REQUIRED` and `missing_categories()`
 
@@ -676,10 +976,12 @@ def missing_categories(texts: list[str]) -> list[str]:
     return [category for category in REQUIRED if not any(word in joined for word in CORPUS[category][0])]
 ```
 
+**Why it matters:**
 - **Made-up data:** Claude can't answer from memory, so it has to delegate.
 - **Two facts per category, one per tool.** Every figure in the final report shows which spoke fetched it: marine's `1.9 GW` came from the web-searcher, `37.5%` from the doc-analyst.
 - `REQUIRED` is the curriculum's list. No prompt lists it: the coordinator has to find the breadth itself.
-- `missing_categories()` matches the same words `web_search` matches. On the real subtopics, "Marine energy (tidal, ...)" counts as tidal and "Bioenergy and biofuels (biomass, ...)" as biomass. Nothing mentions fusion.
+- `missing_categories()` matches the same words `web_search` matches. On the real subtopics, "Marine energy (tidal, ...)" counts as tidal and "Bioenergy and biofuels (biomass, ...)" as biomass. Nothing mentions fusion, so it returned `['fusion']`.
+- Hydropower is in `CORPUS` but not in `REQUIRED`. The real decomposition added it anyway.
 
 #### b) `web_search` and `read_document`
 
@@ -709,7 +1011,11 @@ async def web_search(args: dict[str, Any]) -> dict[str, Any]:
     "read_document",
     "Read one Helios document by its exact id, as named in web_search results (e.g. 'HX-SOL-7'), "
     "and return its key figures.",
-    {...},
+    {
+        "type": "object",
+        "properties": {"doc_id": {"type": "string", "description": "The document id, e.g. 'HX-SOL-7'"}},
+        "required": ["doc_id"],
+    },
     annotations=ToolAnnotations(readOnlyHint=True),
 )
 async def read_document(args: dict[str, Any]) -> dict[str, Any]:
@@ -722,33 +1028,71 @@ async def read_document(args: dict[str, Any]) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": message}], "is_error": True}
 ```
 
+**Why it matters:**
 - **The description is a prompt.** `web_search` promises "the id of the document that holds the full analysis": that id is the hand-off key between the two spokes. `read_document` asks for "its exact id, as named in web_search results".
+- **`readOnlyHint=True`** marks both tools as read-only: they only look things up and change nothing. The web-searcher asked for the geothermal and marine searches together at 18:20:43.
 - **No match is a normal result.** `web_search` returns `No Helios results for '...'` without `is_error`.
 - **A guessed id is an error result, not an exception.** `read_document` returns `is_error: True` with a hint, so the subagent can recover (topic 01's pattern). This branch never ran in the real log: all 7 reads used real ids, and in Run 2 the subagent didn't guess.
+- The handlers are where the `MODEL INPUT   tool_result` lines inside a subagent come from: their returned `content` list is what `log_model_io()` prints.
+
+**Agentic concept:** tools as the subagents' only window on the world, with honest empty and error results.
+
+What the two handlers returned, as logged inside the subagents:
+
+```
+18:20:41  MODEL INPUT   tool_result  [web-searcher] [{'type': 'text', 'text': 'Helios Review 2026, solar: solar capacity grew 31% in 2025. Full analysis: document HX-SOL-7.'}]  (tool_use_id=toolu_011YjbLyay3EJ78Qc1YwsbR2, is_error=None)
+18:20:43  MODEL INPUT   tool_result  [web-searcher] [{'type': 'text', 'text': "No Helios results for 'Green hydrogen and renewable-based fuels electrolysis e-fuels ammonia'."}]  (tool_use_id=toolu_01MYadR2hfCZ7RSZcAYqtmv3, is_error=None)
+18:20:54  MODEL INPUT   tool_result  [doc-analyst] [{'type': 'text', 'text': 'HX-SOL-7 (solar): utility-scale cost fell to $27.40/MWh.'}]  (tool_use_id=toolu_01QcevY8RFyhEaJqJSh1rAmm, is_error=None)
+```
+
+`is_error=None`, not `False`: neither handler sets the key on success, and the log prints what the `ToolResultBlock` carried.
 
 ---
 
 ## 5. Turn-by-turn trace of each run (real output)
 
-Each trace below is the real run from the log named in 3.2, written by the logging version (2026-10-27, 18:20:29 to 18:21:26: 57 seconds for all four `query()` calls). Each logged value is tied to the code above that produced or used it. Long values are trimmed with `...` and wrapped across lines.
+Each trace below is the real run from `logs/poc1_hub_and_spoke_20261027_182029.log` (2026-10-27, 18:20:29 to 18:21:26: 57 seconds for all four `query()` calls). Each log line points back to the statement that wrote it (section 3.2's table).
+
+How to read the log blocks:
+- In the log file, every entry is one line. Here, each entry's header (time, `MODEL INPUT` or `MODEL OUTPUT`, kind, `[agent]`) stays on its first line, and its payload is pretty-printed underneath: one key or list item per line.
+- Long text wraps onto a deeper-indented line. A `\n` inside a string ends the line, as it does in the real text.
+- `...` marks text that was cut. A line that starts with `...` summarizes log lines left out, such as a subagent's research calls with what each returned.
 
 ### 5.1 Run 1, call 1: `decompose()`
 
 **Real log:**
 
 ```
-18:20:29  MODEL INPUT   prompt       [coordinator] Decompose this research topic into subtopics. Do not delegate yet. Topic: renewable energy technologies
-18:20:33  MODEL OUTPUT  structured   [coordinator] {'subtopics': ['Solar photovoltaics (silicon, thin-film, perovskite and tandem cells)',
-                                     'Concentrated solar power and solar thermal',
-                                     'Onshore and offshore wind power (including floating wind and airborne wind)',
-                                     'Hydropower and pumped storage (conventional, run-of-river, small-scale)',
-                                     'Bioenergy and biofuels (biomass, biogas, advanced and algae-based fuels)',
-                                     'Geothermal energy (conventional, enhanced/engineered and closed-loop systems)',
-                                     'Marine energy (tidal, wave, ocean thermal and salinity gradient)',
-                                     'Green hydrogen and renewable-based fuels (electrolysis, e-fuels, ammonia)']}  (id=toolu_0126Levgivd5ukFhTwK9yeGx)
-18:20:33  MODEL INPUT   tool_result  [coordinator] Structured output provided successfully  (tool_use_id=toolu_0126Levgivd5ukFhTwK9yeGx, is_error=None)
+18:20:29  MODEL INPUT   prompt       [coordinator]
+          Decompose this research topic into subtopics. Do not delegate yet. Topic: renewable
+            energy technologies
+
+18:20:33  MODEL OUTPUT  structured   [coordinator]
+          {'subtopics': [
+              'Solar photovoltaics (silicon, thin-film, perovskite and tandem cells)',
+              'Concentrated solar power and solar thermal',
+              'Onshore and offshore wind power (including floating wind and airborne wind)',
+              'Hydropower and pumped storage (conventional, run-of-river, small-scale)',
+              'Bioenergy and biofuels (biomass, biogas, advanced and algae-based fuels)',
+              'Geothermal energy (conventional, enhanced/engineered and closed-loop systems)',
+              'Marine energy (tidal, wave, ocean thermal and salinity gradient)',
+              'Green hydrogen and renewable-based fuels (electrolysis, e-fuels, ammonia)'
+          ]}
+          (id=toolu_0126Levgivd5ukFhTwK9yeGx)
+18:20:33  MODEL INPUT   tool_result  [coordinator]
+          Structured output provided successfully
+          (tool_use_id=toolu_0126Levgivd5ukFhTwK9yeGx, is_error=None)
 18:20:33  MODEL OUTPUT  stop_reason  [coordinator] tool_use  (loop result: success)
 ```
+
+**Which statement wrote each line:**
+
+| Time | Tag | Written by |
+|------|-----|------------|
+| 18:20:29 | `prompt` | `log.info("MODEL INPUT   prompt ...")` in `run_coordinator()`; the text is `decompose()`'s f-string |
+| 18:20:33 | `structured` | `log_model_io()`, the `StructuredOutput` branch |
+| 18:20:33 | `tool_result` | `log_model_io()`, the `ToolResultBlock` branch; `content` is a plain string here |
+| 18:20:33 | `stop_reason` | `log_model_io()`, the `ResultMessage` branch |
 
 **Variable values inside `decompose()` and `run_coordinator()`:**
 
@@ -756,7 +1100,7 @@ Each trace below is the real run from the log named in 3.2, written by the loggi
 |------------------|-------|
 | `prompt` | `"Decompose this research topic into subtopics. Do not delegate yet. Topic: renewable energy technologies"` |
 | `options` | `tools=[]`, no `agents`, no `mcp_servers`, `output_format` with `SUBTOPICS_SCHEMA` |
-| `agent_calls` | empty: no Agent call |
+| `agent_names`, `agent_calls` | both empty: no Agent call |
 | Only tool call | `StructuredOutput`, logged as `structured` |
 | `message.subtype` | `"success"` |
 | `message.stop_reason` | `"tool_use"` |
@@ -767,85 +1111,262 @@ Each trace below is the real run from the log named in 3.2, written by the loggi
 **Lessons from the real data:**
 - About 4 seconds, with no Agent call and no research call. With `tools=[]`, the only tool the coordinator used was the built-in `StructuredOutput`.
 - The decomposition has the shape the prompt asks for: mainstream categories (solar PV, wind, hydropower), niche ones (concentrated solar, marine) and emerging ones (green hydrogen), with no cross-cutting themes.
-- **Fusion is missing.** The build spec (`02-revised-Multi-Agent-Orchestration.md`, C8) names fusion as "the usual one" to go missing, and this run missed it too. The `ValueError` guard still passed, because 8 is at least 5 and all are distinct.
+- **Fusion is missing.** The build spec (`02-revised-Multi-Agent-Orchestration.md`, C8) names fusion as "the usual one" to go missing, and this run missed it too. The `ValueError` guard still passed, because 8 is at least 5 and all 8 are distinct.
 
 ### 5.2 Run 1, call 2: `delegate()`, the hub-and-spoke round
 
-**Real log:**
+**Real log (condensed):**
 
 ```
-18:20:34  MODEL INPUT   prompt       [coordinator] Research goal: a sourced overview of "renewable energy technologies" with key figures from Helios Institute sources.
-                                     Subtopics for this round (delegate only these, using these exact names): ["Solar photovoltaics (silicon, thin-film,
-                                     perovskite and tandem cells)", "Concentrated solar power and solar thermal", ..., "Green hydrogen and renewable-based
-                                     fuels (electrolysis, e-fuels, ammonia)"]
-                                     Delegate with one Agent call that finds sources for all of these subtopics, then one Agent call that reads the
-                                     documents those sources name. Return one section per subtopic.
-18:20:39  MODEL OUTPUT  tool_use     [coordinator] Agent {'description': 'Find Helios sources', 'subagent_type': 'web-searcher', 'prompt': 'Research
-                                     goal: a sourced overview of "renewable energy technologies" with key figures from Helios Institute sources. Find
-                                     Helios Institute sources for each of these exact subtopics, and for each report the document id(s) and any key
-                                     figure returned:\n1. Solar photovoltaics (silicon, thin-film, perovskite and tandem cells)\n2. ...\n8. Green hydrogen
-                                     and renewable-based fuels (electrolysis, e-fuels, ammonia)\nReport per subtopic: document id(s), key figure, and
-                                     clearly note any subtopic with no matching source.'}  (id=toolu_01X4Mf8GuqjwjNsyAnPVjtGP)
-18:20:41  MODEL OUTPUT  tool_use     [web-searcher] mcp__research__web_search {'query': 'Solar photovoltaics silicon thin-film perovskite tandem cells'}  (id=toolu_011YjbLyay3EJ78Qc1YwsbR2)
-18:20:41  MODEL INPUT   tool_result  [web-searcher] [{'type': 'text', 'text': 'Helios Review 2026, solar: solar capacity grew 31% in 2025. Full analysis: document HX-SOL-7.'}]  (tool_use_id=toolu_011YjbLyay3EJ78Qc1YwsbR2, is_error=None)
-18:20:41  MODEL OUTPUT  tool_use     [web-searcher] mcp__research__web_search {'query': 'Concentrated solar power and solar thermal'}  (id=toolu_01BPt4odDAp6pR9fC6wJCAGN)
-18:20:41  MODEL INPUT   tool_result  [web-searcher] [{'type': 'text', 'text': 'Helios Review 2026, solar: solar capacity grew 31% in 2025. Full analysis: document HX-SOL-7.'}]  (tool_use_id=toolu_01BPt4odDAp6pR9fC6wJCAGN, is_error=None)
-18:20:42  MODEL OUTPUT  tool_use     [web-searcher] mcp__research__web_search {'query': 'Onshore and offshore wind power floating wind airborne wind'}  (id=toolu_01SiLaBuimKdhVTnXxFLhQ67)
-18:20:42  MODEL INPUT   tool_result  [web-searcher] [{'type': 'text', 'text': 'Helios Review 2026, wind: offshore wind added 19.6 GW in 2025. Full analysis: document HX-WND-2.'}]  (tool_use_id=toolu_01SiLaBuimKdhVTnXxFLhQ67, is_error=None)
-18:20:42  MODEL OUTPUT  tool_use     [web-searcher] mcp__research__web_search {'query': 'Hydropower and pumped storage'}  (id=toolu_01SN1b9UW5TYhGdiLxQGomgq)
-18:20:42  MODEL INPUT   tool_result  [web-searcher] [{'type': 'text', 'text': 'Helios Review 2026, hydropower: hydropower supplied 14.2% of electricity. Full analysis: document HX-HYD-5.'}]  (tool_use_id=toolu_01SN1b9UW5TYhGdiLxQGomgq, is_error=None)
-18:20:42  MODEL OUTPUT  tool_use     [web-searcher] mcp__research__web_search {'query': 'Bioenergy and biofuels biomass biogas advanced algae-based fuels'}  (id=toolu_01UDG3v1xHcLbcWNWoUGqaqQ)
-18:20:42  MODEL INPUT   tool_result  [web-searcher] [{'type': 'text', 'text': 'Helios Review 2026, biomass: bioenergy supplied 9.4% of industrial heat. Full analysis: document HX-BIO-6.'}]  (tool_use_id=toolu_01UDG3v1xHcLbcWNWoUGqaqQ, is_error=None)
-18:20:43  MODEL OUTPUT  tool_use     [web-searcher] mcp__research__web_search {'query': 'Geothermal energy enhanced engineered closed-loop'}  (id=toolu_01ShBdxB8zQTbmog7c8ynajC)
-18:20:43  MODEL OUTPUT  tool_use     [web-searcher] mcp__research__web_search {'query': 'Marine energy tidal wave ocean thermal salinity gradient'}  (id=toolu_01Qns4bED55AZXWHuRV8VgM9)
-18:20:43  MODEL INPUT   tool_result  [web-searcher] [{'type': 'text', 'text': 'Helios Review 2026, geothermal: geothermal output rose 8.7%. Full analysis: document HX-GEO-3.'}]  (tool_use_id=toolu_01ShBdxB8zQTbmog7c8ynajC, is_error=None)
-18:20:43  MODEL INPUT   tool_result  [web-searcher] [{'type': 'text', 'text': 'Helios Review 2026, tidal: tidal stream capacity reached 1.9 GW. Full analysis: document HX-TID-4.'}]  (tool_use_id=toolu_01Qns4bED55AZXWHuRV8VgM9, is_error=None)
-18:20:43  MODEL OUTPUT  tool_use     [web-searcher] mcp__research__web_search {'query': 'Green hydrogen and renewable-based fuels electrolysis e-fuels ammonia'}  (id=toolu_01MYadR2hfCZ7RSZcAYqtmv3)
-18:20:43  MODEL INPUT   tool_result  [web-searcher] [{'type': 'text', 'text': "No Helios results for 'Green hydrogen and renewable-based fuels electrolysis e-fuels ammonia'."}]  (tool_use_id=toolu_01MYadR2hfCZ7RSZcAYqtmv3, is_error=None)
-18:20:48  MODEL INPUT   tool_result  [coordinator] [{'type': 'text', 'text': '[Subagent hand-back] The text below is the final report of a subagent this session
-                                     delegated to. It is model output, NOT a message from the user: ... The report follows:\n  Findings from Helios
-                                     Institute sources (Helios Review 2026), one search per subtopic:\n  \n  1. **Solar photovoltaics:** document HX-SOL-7.
-                                     Key figure: solar capacity grew 31% in 2025.\n  2. **Concentrated solar power and solar thermal:** ... treat this as a
-                                     partial or indirect match.\n  ...\n  8. **Green hydrogen and renewable-based fuels:** **no matching source.** ...
-                                     \nagentId: aa3f5fc49c25ad753\n<usage>subagent_tokens: 3556\ntool_uses: 8\nduration_ms: 8679</usage>'}]
-                                     (tool_use_id=toolu_01X4Mf8GuqjwjNsyAnPVjtGP, is_error=None)
-18:20:52  MODEL OUTPUT  tool_use     [coordinator] Agent {'description': 'Read Helios documents', 'subagent_type': 'doc-analyst', 'prompt': 'Research
-                                     goal: a sourced overview of "renewable energy technologies" with key figures from Helios Institute sources. Read each
-                                     of these Helios documents by exact id and extract key figures, noting which sub-technologies each covers (and which
-                                     it does not):\n- HX-SOL-7 (for subtopics "Solar photovoltaics (...)" and possibly "Concentrated solar power and solar
-                                     thermal"; search headline: solar capacity grew 31% in 2025)\n- HX-WND-2 (...)\n- HX-HYD-5 (...)\n- HX-BIO-6 (...)
-                                     \n- HX-GEO-3 (...)\n- HX-TID-4 (subtopic "Marine energy (...)"; headline: tidal stream capacity 1.9 GW)\nNo document
-                                     exists for "Concentrated solar power and solar thermal" beyond HX-SOL-7, and none was found for "Green hydrogen and
-                                     renewable-based fuels (...)". Report per document: key figures, and what the document does or does not cover.'}
-                                     (id=toolu_01HUxAcunj8SUSH7b6zhVK8f)
-18:20:54  MODEL OUTPUT  tool_use     [doc-analyst] mcp__research__read_document {'doc_id': 'HX-SOL-7'}  (id=toolu_01QcevY8RFyhEaJqJSh1rAmm)
-18:20:54  MODEL INPUT   tool_result  [doc-analyst] [{'type': 'text', 'text': 'HX-SOL-7 (solar): utility-scale cost fell to $27.40/MWh.'}]  (tool_use_id=toolu_01QcevY8RFyhEaJqJSh1rAmm, is_error=None)
-18:20:54  MODEL OUTPUT  tool_use     [doc-analyst] mcp__research__read_document {'doc_id': 'HX-WND-2'}  (id=toolu_017LGhEQyXyQhFgYjrTvwuB8)
-18:20:54  MODEL INPUT   tool_result  [doc-analyst] [{'type': 'text', 'text': 'HX-WND-2 (wind): the average capacity factor reached 41.3%.'}]  (tool_use_id=toolu_017LGhEQyXyQhFgYjrTvwuB8, is_error=None)
-18:20:54  MODEL OUTPUT  tool_use     [doc-analyst] mcp__research__read_document {'doc_id': 'HX-HYD-5'}  (id=toolu_017vxnUqhjZ79xb2o9wWfkyQ)
-18:20:55  MODEL INPUT   tool_result  [doc-analyst] [{'type': 'text', 'text': 'HX-HYD-5 (hydropower): pumped-storage capacity rose to 212 GW.'}]  (tool_use_id=toolu_017vxnUqhjZ79xb2o9wWfkyQ, is_error=None)
-18:20:55  MODEL OUTPUT  tool_use     [doc-analyst] mcp__research__read_document {'doc_id': 'HX-BIO-6'}  (id=toolu_01HhXAKdxo7dHFNqPE5SdTqR)
-18:20:55  MODEL INPUT   tool_result  [doc-analyst] [{'type': 'text', 'text': 'HX-BIO-6 (biomass): waste feedstocks made up 63% of supply.'}]  (tool_use_id=toolu_01HhXAKdxo7dHFNqPE5SdTqR, is_error=None)
-18:20:55  MODEL OUTPUT  tool_use     [doc-analyst] mcp__research__read_document {'doc_id': 'HX-GEO-3'}  (id=toolu_01Cjg11Xn5apWkw7pzUhsfPJ)
-18:20:55  MODEL INPUT   tool_result  [doc-analyst] [{'type': 'text', 'text': 'HX-GEO-3 (geothermal): enhanced-geothermal pilot wells reached 245 °C.'}]  (tool_use_id=toolu_01Cjg11Xn5apWkw7pzUhsfPJ, is_error=None)
-18:20:55  MODEL OUTPUT  tool_use     [doc-analyst] mcp__research__read_document {'doc_id': 'HX-TID-4'}  (id=toolu_01QwJvcYQnwDEokgByQhGuMx)
-18:20:55  MODEL INPUT   tool_result  [doc-analyst] [{'type': 'text', 'text': 'HX-TID-4 (tidal): the Kestrel Strait array ran at a 37.5% capacity factor.'}]  (tool_use_id=toolu_01QwJvcYQnwDEokgByQhGuMx, is_error=None)
-18:21:01  MODEL INPUT   tool_result  [coordinator] [{'type': 'text', 'text': '[Subagent hand-back] ... The report follows:\n  Each document returned one key
-                                     figure. None returned the headline figure from the search results, so those headlines are unverified by the documents
-                                     themselves.\n  ...\n  - **HX-TID-4 (tidal):** The Kestrel Strait array ran at a 37.5% capacity factor.\n  ...\n
-                                     **Gaps**\n  - No Helios document is available for concentrated solar power and solar thermal beyond HX-SOL-7, ...\n
-                                     - No document was found for green hydrogen and renewable-based fuels.\n  ...\nagentId: a3dd0a7b347c54a13\n<usage>
-                                     subagent_tokens: 3513\ntool_uses: 6\nduration_ms: 8521</usage>'}]  (tool_use_id=toolu_01HUxAcunj8SUSH7b6zhVK8f, is_error=None)
-18:21:08  MODEL OUTPUT  structured   [coordinator] {'sections': [{'subtopic': 'Solar photovoltaics (silicon, thin-film, perovskite and tandem cells)',
-                                     'web_findings': 'Search returned HX-SOL-7 with headline: solar capacity grew 31% in 2025.', 'document_findings':
-                                     'HX-SOL-7 gives utility-scale solar cost fell to $27.40/MWh. ...', 'sources': ['HX-SOL-7']}, ..., {'subtopic': 'Green
-                                     hydrogen and renewable-based fuels (electrolysis, e-fuels, ammonia)', 'web_findings': 'No Helios results returned for
-                                     this subtopic.', 'document_findings': 'No document available. Complete coverage gap.', 'sources': []}]}
-                                     (id=toolu_017tyqwx79jWjspRCTTWfG2T)
-18:21:08  MODEL INPUT   tool_result  [coordinator] Structured output provided successfully  (tool_use_id=toolu_017tyqwx79jWjspRCTTWfG2T, is_error=None)
+── the coordinator's task ────────────────────────────────────────────────────────────────
+
+18:20:34  MODEL INPUT   prompt       [coordinator]
+          Research goal: a sourced overview of "renewable energy technologies" with key
+            figures from Helios Institute sources.
+          Subtopics for this round (delegate only these, using these exact names): ["Solar
+            photovoltaics (silicon, thin-film, perovskite and tandem cells)", "Concentrated
+            solar power and solar thermal", "Onshore and offshore wind power (including
+            floating wind and airborne wind)", "Hydropower and pumped storage (conventional,
+            run-of-river, small-scale)", "Bioenergy and biofuels (biomass, biogas, advanced
+            and algae-based fuels)", "Geothermal energy (conventional, enhanced/engineered
+            and closed-loop systems)", "Marine energy (tidal, wave, ocean thermal and salinity
+            gradient)", "Green hydrogen and renewable-based fuels (electrolysis, e-fuels,
+            ammonia)"]
+          Delegate with one Agent call that finds sources for all of these subtopics, then
+            one Agent call that reads the documents those sources name. Return one section
+            per subtopic.
+
+── spoke 1: web-searcher ─────────────────────────────────────────────────────────────────
+
+18:20:39  MODEL OUTPUT  tool_use     [coordinator]
+          Agent {'description': 'Find Helios sources', 'subagent_type': 'web-searcher',
+                 'prompt': 'Research goal: a sourced overview of "renewable energy
+                     technologies" with key figures from Helios Institute sources. Find
+                     Helios Institute sources for each of these exact subtopics, and for
+                     each report the document id(s) and any key figure returned:\n
+                     1. Solar photovoltaics (silicon, thin-film, perovskite and tandem cells)\n
+                     2. Concentrated solar power and solar thermal\n
+                     3. Onshore and offshore wind power (including floating wind and airborne
+                       wind)\n
+                     4. Hydropower and pumped storage (conventional, run-of-river, small-scale)\n
+                     5. Bioenergy and biofuels (biomass, biogas, advanced and algae-based fuels)\n
+                     6. Geothermal energy (conventional, enhanced/engineered and closed-loop
+                       systems)\n
+                     7. Marine energy (tidal, wave, ocean thermal and salinity gradient)\n
+                     8. Green hydrogen and renewable-based fuels (electrolysis, e-fuels,
+                       ammonia)\n
+                     Report per subtopic: document id(s), key figure, and clearly note any
+                       subtopic with no matching source.'}
+          (id=toolu_01X4Mf8GuqjwjNsyAnPVjtGP)
+
+18:20:41  MODEL OUTPUT  tool_use     [web-searcher]
+          mcp__research__web_search {'query': 'Solar photovoltaics silicon thin-film perovskite
+              tandem cells'}
+          (id=toolu_011YjbLyay3EJ78Qc1YwsbR2)
+18:20:41  MODEL INPUT   tool_result  [web-searcher]
+          [{'type': 'text', 'text': 'Helios Review 2026, solar: solar capacity grew 31% in 2025.
+              Full analysis: document HX-SOL-7.'}]
+          (tool_use_id=toolu_011YjbLyay3EJ78Qc1YwsbR2, is_error=None)
+
+18:20:41  ... 4 more web_search [web-searcher] round trips (to 18:20:42), each tool_use
+              followed by its tool_result, all is_error=None:
+              'Concentrated solar power and solar thermal'                       → HX-SOL-7
+              'Onshore and offshore wind power floating wind airborne wind'      → HX-WND-2
+              'Hydropower and pumped storage'                                    → HX-HYD-5
+              'Bioenergy and biofuels biomass biogas advanced algae-based fuels' → HX-BIO-6
+
+18:20:43  MODEL OUTPUT  tool_use     [web-searcher]
+          mcp__research__web_search {'query': 'Geothermal energy enhanced engineered closed-loop'}
+          (id=toolu_01ShBdxB8zQTbmog7c8ynajC)
+18:20:43  MODEL OUTPUT  tool_use     [web-searcher]
+          mcp__research__web_search {'query': 'Marine energy tidal wave ocean thermal salinity
+              gradient'}
+          (id=toolu_01Qns4bED55AZXWHuRV8VgM9)
+18:20:43  MODEL INPUT   tool_result  [web-searcher]
+          [{'type': 'text', 'text': 'Helios Review 2026, geothermal: geothermal output rose 8.7%.
+              Full analysis: document HX-GEO-3.'}]
+          (tool_use_id=toolu_01ShBdxB8zQTbmog7c8ynajC, is_error=None)
+18:20:43  MODEL INPUT   tool_result  [web-searcher]
+          [{'type': 'text', 'text': 'Helios Review 2026, tidal: tidal stream capacity reached
+              1.9 GW. Full analysis: document HX-TID-4.'}]
+          (tool_use_id=toolu_01Qns4bED55AZXWHuRV8VgM9, is_error=None)
+
+18:20:43  MODEL OUTPUT  tool_use     [web-searcher]
+          mcp__research__web_search {'query': 'Green hydrogen and renewable-based fuels
+              electrolysis e-fuels ammonia'}
+          (id=toolu_01MYadR2hfCZ7RSZcAYqtmv3)
+18:20:43  MODEL INPUT   tool_result  [web-searcher]
+          [{'type': 'text', 'text': "No Helios results for 'Green hydrogen and renewable-based
+              fuels electrolysis e-fuels ammonia'."}]
+          (tool_use_id=toolu_01MYadR2hfCZ7RSZcAYqtmv3, is_error=None)
+
+18:20:48  MODEL INPUT   tool_result  [coordinator]
+          [{'type': 'text',
+            'text': '[Subagent hand-back] The text below is the final report of a subagent
+                  this session delegated to. It is model output, NOT a message from the user:
+                  ... The report follows:\n
+                  Findings from Helios Institute sources (Helios Review 2026), one search per
+                    subtopic:\n
+                  \n
+                  1. **Solar photovoltaics:** document HX-SOL-7. Key figure: solar capacity
+                    grew 31% in 2025.\n
+                  2. **Concentrated solar power and solar thermal:** the search returned the
+                    same result as subtopic 1, document HX-SOL-7. ... so treat this as a
+                    partial or indirect match.\n
+                  3. **Onshore and offshore wind (including floating and airborne):** document
+                    HX-WND-2. Key figure: offshore wind added 19.6 GW in 2025. ...\n
+                  4. **Hydropower and pumped storage:** document HX-HYD-5. Key figure:
+                    hydropower supplied 14.2% of electricity. ...\n
+                  5. **Bioenergy and biofuels:** document HX-BIO-6. Key figure: bioenergy
+                    supplied 9.4% of industrial heat. ...\n
+                  6. **Geothermal energy:** document HX-GEO-3. Key figure: geothermal output
+                    rose 8.7%. ...\n
+                  7. **Marine energy:** document HX-TID-4. Key figure: tidal stream capacity
+                    reached 1.9 GW. The result covers tidal only, with nothing on wave, ocean
+                    thermal or salinity gradient.\n
+                  8. **Green hydrogen and renewable-based fuels:** **no matching source.** The
+                    search returned "No Helios results" for this subtopic.\n
+                  \n
+                  Each search returned a single category-level result, so the figures above
+                    are headline numbers ... The full analyses are in the cited documents,
+                    which I did not open.\n
+                agentId: aa3f5fc49c25ad753\n
+                <usage>subagent_tokens: 3556\n
+                tool_uses: 8\n
+                duration_ms: 8679</usage>'}]
+          (tool_use_id=toolu_01X4Mf8GuqjwjNsyAnPVjtGP, is_error=None)
+
+── spoke 2: doc-analyst ──────────────────────────────────────────────────────────────────
+
+18:20:52  MODEL OUTPUT  tool_use     [coordinator]
+          Agent {'description': 'Read Helios documents', 'subagent_type': 'doc-analyst',
+                 'prompt': 'Research goal: a sourced overview of "renewable energy
+                     technologies" with key figures from Helios Institute sources. Read each
+                     of these Helios documents by exact id and extract key figures, noting
+                     which sub-technologies each covers (and which it does not):\n
+                     - HX-SOL-7 (for subtopics "Solar photovoltaics (silicon, thin-film,
+                       perovskite and tandem cells)" and possibly "Concentrated solar power
+                       and solar thermal"; search headline: solar capacity grew 31% in 2025)\n
+                     - HX-WND-2 (subtopic "Onshore and offshore wind power (including
+                       floating wind and airborne wind)"; headline: offshore wind added
+                       19.6 GW in 2025)\n
+                     - HX-HYD-5 (subtopic "Hydropower and pumped storage (conventional,
+                       run-of-river, small-scale)"; headline: hydropower 14.2% of
+                       electricity)\n
+                     - HX-BIO-6 (subtopic "Bioenergy and biofuels (biomass, biogas, advanced
+                       and algae-based fuels)"; headline: bioenergy 9.4% of industrial heat)\n
+                     - HX-GEO-3 (subtopic "Geothermal energy (conventional,
+                       enhanced/engineered and closed-loop systems)"; headline: geothermal
+                       output rose 8.7%)\n
+                     - HX-TID-4 (subtopic "Marine energy (tidal, wave, ocean thermal and
+                       salinity gradient)"; headline: tidal stream capacity 1.9 GW)\n
+                     No document exists for "Concentrated solar power and solar thermal"
+                       beyond HX-SOL-7, and none was found for "Green hydrogen and
+                       renewable-based fuels (electrolysis, e-fuels, ammonia)". Report per
+                       document: key figures, and what the document does or does not
+                       cover.'}
+          (id=toolu_01HUxAcunj8SUSH7b6zhVK8f)
+
+18:20:54  ... 6 × read_document [doc-analyst] (to 18:20:55), each tool_use followed by its
+              tool_result, all is_error=None:
+              'HX-SOL-7' → HX-SOL-7 (solar): utility-scale cost fell to $27.40/MWh.
+              'HX-WND-2' → HX-WND-2 (wind): the average capacity factor reached 41.3%.
+              'HX-HYD-5' → HX-HYD-5 (hydropower): pumped-storage capacity rose to 212 GW.
+              'HX-BIO-6' → HX-BIO-6 (biomass): waste feedstocks made up 63% of supply.
+              'HX-GEO-3' → HX-GEO-3 (geothermal): enhanced-geothermal pilot wells reached
+                           245 °C.
+              'HX-TID-4' → HX-TID-4 (tidal): the Kestrel Strait array ran at a 37.5%
+                           capacity factor.
+
+18:21:01  MODEL INPUT   tool_result  [coordinator]
+          [{'type': 'text',
+            'text': '[Subagent hand-back] ... The report follows:\n
+                  Each document returned one key figure. None returned the headline figure
+                    from the search results, so those headlines are unverified by the
+                    documents themselves.\n
+                  \n
+                  **Per document**\n
+                  \n
+                  - **HX-SOL-7 (solar):** Utility-scale cost fell to $27.40/MWh.\n
+                    - The returned text doesn\'t say which technology this covers. ...\n
+                    - It doesn\'t show the headline "capacity grew 31% in 2025".\n
+                  ... the same three lines for HX-WND-2, HX-HYD-5, HX-BIO-6 and HX-GEO-3 ...
+                  - **HX-TID-4 (tidal):** The Kestrel Strait array ran at a 37.5% capacity
+                    factor.\n
+                    - This covers tidal stream only. It doesn\'t mention wave, ocean thermal
+                      or salinity gradient.\n
+                    - It doesn\'t show the headline "tidal stream capacity 1.9 GW".\n
+                  \n
+                  **Gaps**\n
+                  - No Helios document is available for concentrated solar power and solar
+                    thermal beyond HX-SOL-7, and HX-SOL-7 shows nothing on it.\n
+                  - No document was found for green hydrogen and renewable-based fuels.\n
+                  - The search headlines differ from what the documents returned. I can\'t
+                    confirm them from these reads, so cite them only as search-result
+                    snippets, not as document figures.\n
+                agentId: a3dd0a7b347c54a13\n
+                <usage>subagent_tokens: 3513\n
+                tool_uses: 6\n
+                duration_ms: 8521</usage>'}]
+          (tool_use_id=toolu_01HUxAcunj8SUSH7b6zhVK8f, is_error=None)
+
+── aggregation ───────────────────────────────────────────────────────────────────────────
+
+18:21:08  MODEL OUTPUT  structured   [coordinator]
+          {'sections': [
+              {'subtopic': 'Solar photovoltaics (silicon, thin-film, perovskite and tandem
+                   cells)',
+               'web_findings': 'Search returned HX-SOL-7 with headline: solar capacity grew
+                   31% in 2025.',
+               'document_findings': 'HX-SOL-7 gives utility-scale solar cost fell to
+                   $27.40/MWh. It does not specify cell technology (silicon, thin-film,
+                   perovskite, tandem) and does not show the 31% headline, which stays
+                   unverified.',
+               'sources': ['HX-SOL-7']},
+              {'subtopic': 'Concentrated solar power and solar thermal',
+               'web_findings': 'Search returned only HX-SOL-7 (general solar, 31% growth
+                   headline); no CSP or solar thermal specific result.',
+               'document_findings': 'HX-SOL-7 says nothing on CSP or solar thermal. No
+                   dedicated source found. Coverage gap.',
+               'sources': ['HX-SOL-7']},
+              ... 4 sections in the same shape: wind (HX-WND-2), hydropower (HX-HYD-5),
+                  bioenergy (HX-BIO-6), geothermal (HX-GEO-3) ...
+              {'subtopic': 'Marine energy (tidal, wave, ocean thermal and salinity
+                   gradient)',
+               'web_findings': 'HX-TID-4 headline: tidal stream capacity reached 1.9 GW.',
+               'document_findings': 'HX-TID-4 gives the Kestrel Strait tidal array a 37.5%
+                   capacity factor. Tidal stream only; nothing on wave, ocean thermal or
+                   salinity gradient. The 1.9 GW headline was not confirmed in the
+                   document.',
+               'sources': ['HX-TID-4']},
+              {'subtopic': 'Green hydrogen and renewable-based fuels (electrolysis,
+                   e-fuels, ammonia)',
+               'web_findings': 'No Helios results returned for this subtopic.',
+               'document_findings': 'No document available. Complete coverage gap.',
+               'sources': []}
+          ]}
+          (id=toolu_017tyqwx79jWjspRCTTWfG2T)
+18:21:08  MODEL INPUT   tool_result  [coordinator]
+          Structured output provided successfully
+          (tool_use_id=toolu_017tyqwx79jWjspRCTTWfG2T, is_error=None)
 18:21:08  MODEL OUTPUT  stop_reason  [coordinator] tool_use  (loop result: success)
+
 18:21:09  Categories the decomposition missed: ['fusion']
 ```
+
+**Which statement wrote each line:**
+
+| Lines | Written by | What else the code did with that message |
+|-------|------------|------------------------------------------|
+| 18:20:34 `prompt` | `log.info("MODEL INPUT   prompt ...")` in `run_coordinator()`; text built by `delegate()` | none |
+| 18:20:39 and 18:20:52 `tool_use [coordinator] Agent` | `log_model_io()`, `ToolUseBlock` branch | `log_model_io()` stored the name in `agent_names`; `run_coordinator()` added the call to `agent_calls` |
+| `tool_use [web-searcher]`, `tool_use [doc-analyst]` | `log_model_io()`, `ToolUseBlock` branch; tag from `agent_names[parent_tool_use_id]` | `run_coordinator()` skipped them: `parent_tool_use_id` is not `None` |
+| `tool_result [web-searcher]`, `tool_result [doc-analyst]` | `log_model_io()`, `ToolResultBlock` branch; content returned by `web_search()` / `read_document()` | skipped: their `tool_use_id` is not in `agent_calls` |
+| 18:20:48 and 18:21:01 `tool_result [coordinator]` | `log_model_io()`, `ToolResultBlock` branch | `run_coordinator()` stored `text_of(block.content)` as that call's `report` |
+| 18:21:08 `structured` | `log_model_io()`, `StructuredOutput` branch | none |
+| 18:21:08 `tool_result` (`Structured output provided successfully`) | `log_model_io()` | skipped: its id is not in `agent_calls` |
+| 18:21:08 `stop_reason` | `log_model_io()`, `ResultMessage` branch | `run_coordinator()` set `subtype` and `output = message.structured_output` |
+| 18:21:09 `Categories the decomposition missed` | `log.info(...)` in `main()` | none |
 
 **What each step did and which code ran:**
 
@@ -890,16 +1411,18 @@ Each trace below is the real run from the log named in 3.2, written by the loggi
 
 | Variable / field | Value |
 |------------------|-------|
+| `agent_names` | `{"toolu_01X4Mf8GuqjwjNsyAnPVjtGP": "web-searcher", "toolu_01HUxAcunj8SUSH7b6zhVK8f": "doc-analyst"}` |
 | `agent_calls` | 2 items in call order: `{"id": "toolu_01X4Mf8GuqjwjNsyAnPVjtGP", "subagent_type": "web-searcher", "prompt": "Research goal: ...", "report": "[Subagent hand-back] ..."}`, then `{"id": "toolu_01HUxAcunj8SUSH7b6zhVK8f", "subagent_type": "doc-analyst", ...}` |
 | `message.subtype` | `"success"` |
 | `message.stop_reason` | `"tool_use"` |
-| `output` (`message.structured_output`) | Not logged. `delegate()` returned without an error, so it held the `sections` list. |
+| `output` (`message.structured_output`) | The `sections` object from the `structured` line (the log shows the `StructuredOutput` input, not the `ResultMessage` field itself) |
 | `delegate()` returned | `{"sections": [...8 sections...], "agent_calls": [...2 calls...]}` |
 | `report` (from `research_once()`) | `{"topic": "renewable energy technologies", "subtopics": [8], "sections": [8], "agent_calls": [2]}` |
-| `missed` = `missing_categories(report["subtopics"])` | `['fusion']` (the logging version logged it at 18:21:09) |
+| `missing_categories(report["subtopics"])` | `['fusion']`, logged at 18:21:09 |
 
 **Lessons from the real data:**
 - **Context from a prior agent travelled through the hub.** The doc-analyst's brief carries all six document ids from the web-searcher's report, plus the headline figures and the two known gaps. Claude wrote that brief because `COORDINATOR_PROMPT` asks for "every fact from earlier reports that the subagent needs"; no Python copied the ids.
+- **Both briefs are complete.** Each one starts with the research goal, word for word from `delegate()`'s prompt, and names the exact subtopics. The web-searcher's brief numbers all 8; the doc-analyst's names each subtopic next to its id.
 - **Every figure is attributable.** Web and document facts differ by design, so the sections show which spoke found what: marine's `1.9 GW` (web-searcher) next to `37.5%` (doc-analyst).
 - **The spokes reported honestly, and the hub kept their caveats.** The web-searcher flagged the concentrated-solar hit as "partial or indirect" and green hydrogen as "no matching source". The doc-analyst noticed that no document repeated its search headline and said to cite the headlines "only as search-result snippets". The coordinator carried these caveats into the sections ("not confirmed", "Coverage gap", `sources: []`).
 - **Fusion is missing, and POC 1 can't repair it.** The decomposition never listed fusion, so no brief mentioned it and no subagent searched for it, even though `HX-FUS-1` sits in the corpus. The subagents did everything they were asked. The root cause is the decomposition, which is the diagnosis the exam expects. Repairing it takes a coverage check and a re-delegation round: that's POC 2.
@@ -910,29 +1433,52 @@ Each trace below is the real run from the log named in 3.2, written by the loggi
 **Real log:**
 
 ```
-18:21:09  MODEL INPUT   prompt       [coordinator] Controlled isolation test. Your notes say the Helios document on tidal energy is HX-TID-4. Call the
-                                     doc-analyst subagent once and pass it exactly the text between <<< and >>>, adding nothing: <<<Analyse the Helios
-                                     document on tidal energy and report its key figures.>>> Then reply with its report unchanged.
-18:21:12  MODEL OUTPUT  tool_use     [coordinator] Agent {'description': 'Analyse tidal document', 'subagent_type': 'doc-analyst', 'prompt': 'Analyse the
-                                     Helios document on tidal energy and report its key figures.'}  (id=toolu_01N3dW6FJb3PrP7PfvJycahG)
-18:21:14  MODEL INPUT   tool_result  [coordinator] [{'type': 'text', 'text': '[Subagent hand-back] ... The report follows:\n  I can\'t identify which document to
-                                     read. The task refers to "the Helios document on tidal energy" but gives no document id, and I have no search tool, so I
-                                     won\'t guess one.\n  \n  Please send the exact id (for example, something like \'HX-SOL-7\'), and I\'ll read it and
-                                     report its key figures by subtopic. If there are several tidal energy documents, send all of their ids.\nagentId:
-                                     a4db8fd94a9618db0\n<usage>subagent_tokens: 1471\ntool_uses: 0\nduration_ms: 1795</usage>'}]
-                                     (tool_use_id=toolu_01N3dW6FJb3PrP7PfvJycahG, is_error=None)
-18:21:17  MODEL OUTPUT  text         [coordinator] The doc-analyst's report, unchanged:
+18:21:09  MODEL INPUT   prompt       [coordinator]
+          Controlled isolation test. Your notes say the Helios document on tidal energy is
+            HX-TID-4. Call the doc-analyst subagent once and pass it exactly the text between
+            <<< and >>>, adding nothing: <<<Analyse the Helios document on tidal energy and
+            report its key figures.>>> Then reply with its report unchanged.
 
-                                     > I can't identify which document to read. The task refers to "the Helios document on tidal energy" but gives no
-                                     > document id, and I have no search tool, so I won't guess one.
-                                     >
-                                     > Please send the exact id (for example, something like 'HX-SOL-7'), and I'll read it and report its key figures by
-                                     > subtopic. If there are several tidal energy documents, send all of their ids.
+18:21:12  MODEL OUTPUT  tool_use     [coordinator]
+          Agent {'description': 'Analyse tidal document', 'subagent_type': 'doc-analyst',
+                 'prompt': 'Analyse the Helios document on tidal energy and report its key
+                     figures.'}
+          (id=toolu_01N3dW6FJb3PrP7PfvJycahG)
 
-                                     The subagent returned no key figures. I passed along your exact text, which didn't include the id HX-TID-4, so it had
-                                     nothing to look up. I can re-run it with the id included if you want.
+18:21:14  MODEL INPUT   tool_result  [coordinator]
+          [{'type': 'text',
+            'text': '[Subagent hand-back] ... The report follows:\n
+                  I can\'t identify which document to read. The task refers to "the Helios
+                    document on tidal energy" but gives no document id, and I have no search
+                    tool, so I won\'t guess one.\n
+                  \n
+                  Please send the exact id (for example, something like \'HX-SOL-7\'), and
+                    I\'ll read it and report its key figures by subtopic. If there are several
+                    tidal energy documents, send all of their ids.\n
+                agentId: a4db8fd94a9618db0\n
+                <usage>subagent_tokens: 1471\n
+                tool_uses: 0\n
+                duration_ms: 1795</usage>'}]
+          (tool_use_id=toolu_01N3dW6FJb3PrP7PfvJycahG, is_error=None)
+
+18:21:17  MODEL OUTPUT  text         [coordinator]
+          The doc-analyst's report, unchanged:
+
+          > I can't identify which document to read. The task refers to "the Helios document
+          >   on tidal energy" but gives no document id, and I have no search tool, so I
+          >   won't guess one.
+          >
+          > Please send the exact id (for example, something like 'HX-SOL-7'), and I'll read
+          >   it and report its key figures by subtopic. If there are several tidal energy
+          >   documents, send all of their ids.
+
+          The subagent returned no key figures. I passed along your exact text, which didn't
+            include the id HX-TID-4, so it had nothing to look up. I can re-run it with the id
+            included if you want.
 18:21:17  MODEL OUTPUT  stop_reason  [coordinator] end_turn  (loop result: success)
 ```
+
+**Which statement wrote each line:** `prompt` by `run_coordinator()`'s `log.info`, with the text from `ISOLATION_TEST.format(brief=BRIEFS[0])`; the Agent `tool_use`, the report's `tool_result`, the `text` and the `stop_reason` by `log_model_io()`. There is no `[doc-analyst]` line at all: the subagent made no tool call.
 
 **Variable values inside `run_coordinator()`:**
 
@@ -957,28 +1503,57 @@ Each trace below is the real run from the log named in 3.2, written by the loggi
 **Real log:**
 
 ```
-18:21:18  MODEL INPUT   prompt       [coordinator] Controlled isolation test. Your notes say the Helios document on tidal energy is HX-TID-4. Call the
-                                     doc-analyst subagent once and pass it exactly the text between <<< and >>>, adding nothing: <<<Research goal: a
-                                     sourced overview of renewable energy technologies. Subtopic: tidal energy. Context from the web-searcher: the Helios
-                                     entry for tidal energy is document HX-TID-4. Read it and report its key figures.>>> Then reply with its report unchanged.
-18:21:20  MODEL OUTPUT  tool_use     [coordinator] Agent {'description': 'Read tidal document', 'subagent_type': 'doc-analyst', 'prompt': 'Research goal: a
-                                     sourced overview of renewable energy technologies. Subtopic: tidal energy. Context from the web-searcher: the Helios
-                                     entry for tidal energy is document HX-TID-4. Read it and report its key figures.'}  (id=toolu_0118dmoxaTYfw8R46rt7nTPH)
-18:21:22  MODEL OUTPUT  tool_use     [doc-analyst] mcp__research__read_document {'doc_id': 'HX-TID-4'}  (id=toolu_01A2yEKJ5VWnUy6L5Mmpm6LW)
-18:21:22  MODEL INPUT   tool_result  [doc-analyst] [{'type': 'text', 'text': 'HX-TID-4 (tidal): the Kestrel Strait array ran at a 37.5% capacity factor.'}]  (tool_use_id=toolu_01A2yEKJ5VWnUy6L5Mmpm6LW, is_error=None)
-18:21:24  MODEL INPUT   tool_result  [coordinator] [{'type': 'text', 'text': "[Subagent hand-back] ... The report follows:\n  Key figures from HX-TID-4 (tidal
-                                     energy):\n  \n  - The Kestrel Strait array ran at a 37.5% capacity factor.\n  \n  The document gave only this one
-                                     figure. It had no installed capacity, energy output, cost, or date, and it didn't say what type of array it covers. I
-                                     can't say more about those without reading other sources.\nagentId: a60d7b8412e5d4173\n<usage>subagent_tokens: 1651
-                                     \ntool_uses: 1\nduration_ms: 3795</usage>"}]  (tool_use_id=toolu_0118dmoxaTYfw8R46rt7nTPH, is_error=None)
-18:21:26  MODEL OUTPUT  text         [coordinator] Key figures from HX-TID-4 (tidal energy):
+18:21:18  MODEL INPUT   prompt       [coordinator]
+          Controlled isolation test. Your notes say the Helios document on tidal energy is
+            HX-TID-4. Call the doc-analyst subagent once and pass it exactly the text between
+            <<< and >>>, adding nothing: <<<Research goal: a sourced overview of renewable
+            energy technologies. Subtopic: tidal energy. Context from the web-searcher: the
+            Helios entry for tidal energy is document HX-TID-4. Read it and report its key
+            figures.>>> Then reply with its report unchanged.
 
-                                     - The Kestrel Strait array ran at a 37.5% capacity factor.
+18:21:20  MODEL OUTPUT  tool_use     [coordinator]
+          Agent {'description': 'Read tidal document', 'subagent_type': 'doc-analyst',
+                 'prompt': 'Research goal: a sourced overview of renewable energy
+                     technologies. Subtopic: tidal energy. Context from the web-searcher:
+                     the Helios entry for tidal energy is document HX-TID-4. Read it and
+                     report its key figures.'}
+          (id=toolu_0118dmoxaTYfw8R46rt7nTPH)
 
-                                     The document gave only this one figure. It had no installed capacity, energy output, cost, or date, and it didn't
-                                     say what type of array it covers.
+18:21:22  MODEL OUTPUT  tool_use     [doc-analyst]
+          mcp__research__read_document {'doc_id': 'HX-TID-4'}
+          (id=toolu_01A2yEKJ5VWnUy6L5Mmpm6LW)
+18:21:22  MODEL INPUT   tool_result  [doc-analyst]
+          [{'type': 'text', 'text': 'HX-TID-4 (tidal): the Kestrel Strait array ran at a 37.5%
+              capacity factor.'}]
+          (tool_use_id=toolu_01A2yEKJ5VWnUy6L5Mmpm6LW, is_error=None)
+
+18:21:24  MODEL INPUT   tool_result  [coordinator]
+          [{'type': 'text',
+            'text': "[Subagent hand-back] ... The report follows:\n
+                  Key figures from HX-TID-4 (tidal energy):\n
+                  \n
+                  - The Kestrel Strait array ran at a 37.5% capacity factor.\n
+                  \n
+                  The document gave only this one figure. It had no installed capacity,
+                    energy output, cost, or date, and it didn't say what type of array it
+                    covers. I can't say more about those without reading other sources.\n
+                agentId: a60d7b8412e5d4173\n
+                <usage>subagent_tokens: 1651\n
+                tool_uses: 1\n
+                duration_ms: 3795</usage>"}]
+          (tool_use_id=toolu_0118dmoxaTYfw8R46rt7nTPH, is_error=None)
+
+18:21:26  MODEL OUTPUT  text         [coordinator]
+          Key figures from HX-TID-4 (tidal energy):
+
+          - The Kestrel Strait array ran at a 37.5% capacity factor.
+
+          The document gave only this one figure. It had no installed capacity, energy output,
+            cost, or date, and it didn't say what type of array it covers.
 18:21:26  MODEL OUTPUT  stop_reason  [coordinator] end_turn  (loop result: success)
 ```
+
+**Which statement wrote each line:** `prompt` by `run_coordinator()`'s `log.info`, with the text from `ISOLATION_TEST.format(brief=BRIEFS[1])`; every other line by `log_model_io()`. The two `[doc-analyst]` lines are tagged through `agent_names["toolu_0118dmoxaTYfw8R46rt7nTPH"]`, and the `tool_result` content is what `read_document()` returned.
 
 **What each step did and which code ran:**
 
@@ -1002,6 +1577,7 @@ Each trace below is the real run from the log named in 3.2, written by the loggi
 - **Same subagent, same definition, same tool, same model. Only the brief changed.** Zero tool calls became one, and "I can't identify which document" became `37.5%`.
 - **This is the exam's diagnostic order.** When a subagent's output is poor, check what the coordinator gave it first. Rewriting the doc-analyst would have fixed nothing.
 - **The full brief is a template for every delegation:** the research goal, the exact subtopic, and the context a prior agent produced.
+- **The coordinator edited again.** It dropped the report's last sentence ("I can't say more about those without reading other sources."), although it was told to reply "unchanged". The figures came through intact.
 
 ### 5.5 The four calls side by side
 
@@ -1012,13 +1588,14 @@ Each trace below is the real run from the log named in 3.2, written by the loggi
 | Research tool calls | 0 | 8 `web_search` + 6 `read_document` | 0 | 1 `read_document` |
 | `subagent_tokens` (from `<usage>`) | none | 3556 + 3513 | 1471 | 1651 |
 | Subagent `duration_ms` (from `<usage>`) | none | 8679 + 8521 | 1795 | 3795 |
+| Log entries | 4 | 36, then the `Categories ...` line | 5 | 7 |
 | Final `message.subtype` | `success` | `success` | `success` | `success` |
 | Final `message.stop_reason` | `tool_use` | `tool_use` | `end_turn` | `end_turn` |
 | `ResultError` raised? | no | no | no | no |
 | `output` | 8 subtopics (no fusion) | 8 sections | text: "no document id" | text: `37.5%` |
 | Wall time (from log) | about 4 s | about 34 s | about 8 s | about 8 s |
 
-After Run 1, `missed` held `['fusion']` (the log line `Categories the decomposition missed: ['fusion']`). The log has no error line, so the script exited with `0`.
+After Run 1, `main()` logged `Categories the decomposition missed: ['fusion']`. The log has no `Stopped:` or `SDK error:` line, so the script exited with `0`.
 
 ---
 
@@ -1028,6 +1605,7 @@ After Run 1, `missed` held `['fusion']` (the log line `Categories the decomposit
 |---------|-----------------------|
 | **Hub-and-spoke** | Every delegation is coordinator → subagent → coordinator. The log tags show every Agent call as `[coordinator]` and every research call as a spoke. |
 | **Coordinator responsibilities** | Decompose (`decompose()`), select and brief (`delegate()`'s prompt names no subagent), aggregate (`SECTIONS_SCHEMA`). |
+| **Role in the system prompt** | `COORDINATOR_PROMPT`: three jobs, two spokes, the context rule. The subagents never see it. |
 | **Delegation as a tool call** | An Agent `tool_use` → the SDK runs the subagent → the report returns as the `tool_result` with the same id. |
 | **Subagent isolation** | A fresh context: the subagent's own prompt plus the brief. Run 2 proves it. |
 | **Explicit context passing** | Goal + exact subtopics + facts from prior agents in every brief: Run 1's doc-analyst brief, and Run 3. |
@@ -1036,7 +1614,8 @@ After Run 1, `missed` held `['fusion']` (the log line `Categories the decomposit
 | **Specialization and least privilege** | One tool per spoke and no `Agent` tool for spokes; `tools=["Agent"]` is the hub's only built-in tool. |
 | **Decomposition decides coverage** | `missing_categories()` → `['fusion']`: a category never delegated is never researched. |
 | **Structured hand-off** | `output_format` → `StructuredOutput` → `ResultMessage.structured_output`, never parsed from text. |
-| **One stream, three agents** | `parent_tool_use_id` tells the messages apart: `None` is the hub; any other value is the id of the Agent call that started a subagent. `run_coordinator()` records only the hub's Agent calls. |
+| **One stream, three agents** | `parent_tool_use_id` tells the messages apart: `None` is the hub; any other value is the id of the Agent call that started a subagent. `log_model_io()` turns it into a tag; `run_coordinator()` records only the hub's Agent calls. |
+| **Observability** | One log line per model input or output, tagged with its agent, on the console and in a file. This whole article was written from that file. |
 | **Guardrails at two levels** | `max_turns` and `max_budget_usd` per coordinator call (the budget includes the subagents); `maxTurns=15` per subagent. |
 | **Honest failure** | "no matching source" and "I won't guess one": empty results and refusals instead of invented data. |
 
@@ -1054,6 +1633,8 @@ After Run 1, `missed` held `['fusion']` (the log line `Categories the decomposit
 8. **Requiring `stop_reason == "end_turn"` for a structured run.** Both structured calls ended with `success` + `tool_use`.
 9. **Reading `subtype == "success"` as "the task worked".** Run 2 was `success` and produced no figures.
 10. **Fire-and-forget subagents when the next brief needs the report.** `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` makes each Agent call return the report itself.
+11. **Logging a multi-agent stream without agent tags.** Without `parent_tool_use_id`, 19 tool calls from three agents look the same, and you can't check that the hub never researched.
+12. **Trusting a code comment over the run.** `main()` says `# [] expected`; the run logged `['fusion']`. Model decisions vary between runs, so check them every time.
 
 ---
 
@@ -1066,13 +1647,13 @@ The objectives come from `curriculum/01-Agentic-Architecture-&-Orchestration/02-
 | Exam objective | What a correct answer looks like | Where this POC shows it |
 |----------------|----------------------------------|-------------------------|
 | 1. A coordinator agent takes a broad research topic | The coordinator, not the subagents, owns decomposition, subagent selection and aggregation. One function takes a topic string and returns a structured report, and a system prompt defines the coordinator as the orchestrating hub. | `research_once()`, `COORDINATOR_PROMPT`, `delegate()` |
-| 2. Decompose into at least 5 distinct subtopics that cover the full breadth | Breadth, not just count. For "renewable energy technologies": solar, wind, geothermal, tidal, biomass and fusion at minimum. Incomplete output traces back to the decomposition. | `decompose()` and its `ValueError` guard; `missing_categories()`, which returned `['fusion']` in the real run |
+| 2. Decompose into at least 5 distinct subtopics that cover the full breadth | Breadth, not just count. For "renewable energy technologies": solar, wind, geothermal, tidal, biomass and fusion at minimum. Incomplete output traces back to the decomposition. | `decompose()` and its `ValueError` guard; `missing_categories()`, which logged `['fusion']` in the real run |
 | 3. Two subagents with explicit context passing | Each brief carries the research goal, the full subtopic and the context from prior agents. Subagents share no memory and inherit no context. For a poor result, check the coordinator's brief before the subagent. | `AGENTS`; the doc-analyst's brief in Run 1; Runs 2 and 3 |
 | 4. Aggregate both results and evaluate coverage | Merge both subagents' results per subtopic, then judge coverage against the whole topic (well covered, partial, missing). Gaps found here trigger re-delegation. | Aggregation: `SECTIONS_SCHEMA`. Coverage: POC 2's `assess_coverage()`; POC 1 only flags gaps inside the sections |
 | 5. Iterative refinement loop | Assess, re-delegate only the gaps with targeted briefs, and assess again. Stop at a coverage threshold or an iteration cap. One round is a dispatcher, not a coordinator. | Not in POC 1 (`research_once()`: "One round, no loop"); POC 2's `research()`. The real run shows why it's needed: fusion stayed missing. |
 | 6. Test with renewable energy: all six categories | A final report with substantive sections on all six and 100% coverage. If only solar and wind appear, the root cause is the decomposition. | POC 1 checks the decomposition (`['fusion']`); POC 2's run `full` checks the final report |
 
-> **Exam tip:** the build spec notes that exam material calls the spawning tool **Task**, the name older SDKs used (the code matches both: `block.name in ("Agent", "Task")`). Exam questions may also describe subagents as separate API conversations. In every form the rule is the same: a subagent starts with only what the coordinator writes into its prompt.
+> **Exam tip:** exam material calls the spawning tool **Task**, the name older SDKs used (the code matches both: `block.name in ("Agent", "Task")`). Exam questions may also describe subagents as separate API conversations. In every form the rule is the same: a subagent starts with only what the coordinator writes into its prompt.
 
 ### 8.2 The same hub and spokes with the raw Messages API
 
@@ -1161,6 +1742,7 @@ def delegate(topic: str, subtopics: list[str]) -> list[dict]:
 | Claude picks `subagent_type` from the descriptions inside `AGENT_TOOL` | Claude picks `subagent_type` from each `AgentDefinition.description` |
 | `run_subagent()` starts a new `messages` list that holds only the brief | The SDK starts the subagent in a fresh context that holds only the Agent call's `prompt` |
 | The subagent's own `agent_loop()`, capped at 15 iterations | Runs inside the Agent call, capped by `maxTurns=15`; its messages reach your `async for` with `parent_tool_use_id` set |
+| You know which loop a call came from, because you wrote the loops | `parent_tool_use_id` on each message; `log_model_io()` turns it into `[web-searcher]` or `[doc-analyst]` |
 | The report goes back as the `tool_result` of the `agent` call (same `tool_use_id`) | The report arrives as the `ToolResultBlock` of the Agent call (same id), inside a `[Subagent hand-back]` frame |
 | The coordinator model copies facts from report 1 into brief 2 | The same: Claude writes it, as `COORDINATOR_PROMPT` asks |
 | `output_config={"format": {"type": "json_schema", ...}}`: the final text is JSON, read with `json.loads()` | `output_format`: Claude calls the `StructuredOutput` tool, the code reads `ResultMessage.structured_output`, and the last `stop_reason` is `tool_use` |
@@ -1169,7 +1751,7 @@ def delegate(topic: str, subtopics: list[str]) -> list[dict]:
 
 Two things the raw version makes obvious:
 - **Isolation is not a switch; it's a new `messages` list.** Whatever isn't in the brief isn't in the subagent's context.
-- **Here, the coordinator can't research, because no research tool is in its `tools` list.** In the POC, that rule lives in the prompt (see the note in 4.9).
+- **Here, the coordinator can't research, because no research tool is in its `tools` list.** In the POC, that rule lives in the prompt (see the note in 4.11).
 
 ### 8.3 Scenario questions
 
@@ -1186,7 +1768,7 @@ A research system's report on "renewable energy technologies" has strong section
 - C. The coordinator's decomposition: geothermal, tidal, biomass and fusion were never delegated.
 - D. The aggregation step dropped the other sections.
 
-**Answer: C.** A subagent researches only what its brief assigns. If no brief mentions a category, no tool will ever find it, however good the subagents are. D is wrong because the other sections never existed: nothing was delegated for them. *POC link:* `missing_categories(report["subtopics"])` in `main()`. In the real run no brief mentioned fusion, so no subagent searched for it, even though `HX-FUS-1` is in the corpus.
+**Answer: C.** A subagent researches only what its brief assigns. If no brief mentions a category, no tool will ever find it, however good the subagents are. D is wrong because the other sections never existed: nothing was delegated for them. *POC link:* the `Categories the decomposition missed:` line that `main()` logs. In the real run no brief mentioned fusion, so no subagent searched for it, even though `HX-FUS-1` is in the corpus.
 
 ---
 
@@ -1242,16 +1824,16 @@ The document-analysis subagent needs the document ids that the web-search subage
 
 ---
 
-**Scenario 6: Who owns decomposition?**
+**Scenario 6: Auditing who did what**
 
-A team suggests letting each subagent choose its own subtopics, because "the specialists know their sources best". The coordinator would just forward the topic. What should the architect object to?
+A team must show from a production trace that its coordinator never called the research tools itself, and that every subagent report went back to the coordinator. The trace is one flat stream of messages from all three agents. What lets them attribute each tool call and each report?
 
-- A. Nothing: specialists should decompose.
-- B. Decomposition, subagent selection and aggregation are the coordinator's job. Spread across spokes, no single agent owns coverage, so gaps can't be traced back to one decision or repaired.
-- C. Only the extra token cost.
-- D. Subagents can't call tools until the coordinator has decomposed the topic.
+- A. The order of the messages: a subagent's calls always come right after an Agent call.
+- B. The tool names: research tools are only ever called by subagents.
+- C. Each message's `parent_tool_use_id` (`None` for the coordinator, otherwise the id of the Agent call that started the subagent), and each report's `tool_use_id`, which equals its Agent call's id.
+- D. The timestamps of the messages.
 
-**Answer: B.** The hub owns the plan and the merge; the spokes own the execution. That split is what makes "incomplete output traces back to the coordinator's decomposition" a usable diagnosis. *POC link:* the three jobs in `COORDINATOR_PROMPT`; `decompose()` runs with `tools=[]` before any subagent exists.
+**Answer: C.** The ids are the only reliable link. A and D break as soon as calls run in parallel or interleave. B assumes what the audit has to prove: in the POC the research tools are registered for the whole coordinator call, and only a prompt rule stops the coordinator from using them. *POC link:* `log_model_io()` computes each tag from `parent_tool_use_id`; in the real log no `mcp__research__*` line is tagged `[coordinator]`, and both reports carry their Agent call's id (`toolu_01X4M...`, `toolu_01HUx...`).
 
 ---
 
@@ -1277,7 +1859,7 @@ The web-search subagent returns headline figures, and the document-analysis suba
 - C. Build one section per subtopic with both subagents' findings and the source ids, returned as schema-checked JSON that code reads directly.
 - D. Spawn a third subagent to summarize both reports.
 
-**Answer: C.** Aggregation is the coordinator's job, and a per-subtopic structure keeps both sources and their attribution. A leaves code to parse prose, B throws findings away, and D hands the coordinator's job to a spoke. *POC link:* `SECTIONS_SCHEMA` (`web_findings`, `document_findings`, `sources`), read from `ResultMessage.structured_output`.
+**Answer: C.** Aggregation is the coordinator's job, and a per-subtopic structure keeps both sources and their attribution. A leaves code to parse prose, B throws findings away, and D hands the coordinator's job to a spoke. *POC link:* `SECTIONS_SCHEMA` (`web_findings`, `document_findings`, `sources`), read from `ResultMessage.structured_output`; the `structured` line at 18:21:08 holds both figures per section.
 
 ---
 
@@ -1290,7 +1872,7 @@ A team copies topic 01's completion check, `subtype == "success" and stop_reason
 - C. `structured_output` is filled only on `error_max_turns`.
 - D. Subagents can't return JSON.
 
-**Answer: B.** The run's last model action is the `StructuredOutput` tool call, so the final `stop_reason` is `tool_use`, even on success. Here, `subtype` is the completion signal. A is ruled out because the JSON was accepted ("Structured output provided successfully"). *POC link:* both structured calls in the real log end with `stop_reason [coordinator] tool_use (loop result: success)`, and `run_coordinator()` checks only `subtype`.
+**Answer: B.** The run's last model action is the `StructuredOutput` tool call, so the final `stop_reason` is `tool_use`, even on success. Here, `subtype` is the completion signal. A is ruled out because the JSON was accepted ("Structured output provided successfully"). *POC link:* both structured calls in the real log end with `stop_reason  [coordinator] tool_use  (loop result: success)`, and `run_coordinator()` checks only `subtype`.
 
 ---
 
@@ -1303,7 +1885,7 @@ After one delegation round, the sections show two gaps (no data on concentrated 
 - C. Ask each subagent to rate its own report.
 - D. Raise `max_turns` so the first round runs longer.
 
-**Answer: B.** Evaluating the result and re-delegating the gaps is what separates a coordinator from a dispatcher. The threshold is the main stop; the iteration cap is the safety net, and when it fires the coordinator returns the partial report, flagged as incomplete. A repeats the same blind spot. C asks each spoke to judge coverage it can't see: only the coordinator has both reports and the whole topic. D gives the first round more turns but no new instructions. *POC link:* `research_once()` ("One round, no loop") and the real run's gaps; POC 2's `research()`, with `COVERAGE_THRESHOLD = 100`, `MAX_ITERATIONS = 3` and the `Fix only these gaps:` prompt lines; when the cap stops it, it returns the partial report with `complete: False`.
+**Answer: B.** Evaluating the result and re-delegating the gaps is what separates a coordinator from a dispatcher. The threshold is the main stop; the iteration cap is the safety net, and when it fires the coordinator returns the partial report, flagged as incomplete. A repeats the same blind spot. C asks each spoke to judge coverage it can't see: only the coordinator has both reports and the whole topic. D gives the first round more turns but no new instructions. *POC link:* `research_once()` ("One round, no loop") and the real run's gaps; POC 2's `research()` adds the coverage check, the `Fix only these gaps:` lines in `delegate()`, a threshold and an iteration cap.
 
 ---
 
@@ -1330,13 +1912,13 @@ one round              → a dispatcher; a coordinator assesses coverage and re-
 ## 9. How to run it
 
 ```bash
-cd raw-poc/01-Agentic-Architecture-Orchestration/02-Multi-Agent-Orchestration
+cd 01-Agentic-Architecture-Orchestration/02-Multi-Agent-Orchestration
 source .venv/bin/activate        # the folder's venv (claude-agent-sdk 0.2.174)
 python poc1_hub_and_spoke.py     # paid: 3 runs, 4 query() calls, uses ANTHROPIC_API_KEY from .env
-python poc2_refinement.py        # paid: POC 2, the refinement loop (about 9 query() calls)
+python poc2_refinement.py        # paid: POC 2, the refinement loop
 ```
 
 - Both scripts call the API. This folder has no free offline demo.
-- `.env` needs `ANTHROPIC_API_KEY`. `MODEL_ID`, `MAX_TURNS` and `MAX_BUDGET_USD` fall back to `claude-sonnet-5-5`, `20` and `1.00`. The README suggests `MAX_BUDGET_USD=1.00`, because one call runs a coordinator and two subagents.
-- The exit code is `0` when all runs finish, even if `missing_categories()` finds a miss (it's only kept in `missed`). It's `1` on a setup failure, on a coordinator step that returned nothing usable (`RuntimeError` or `ValueError`), or on an SDK runtime failure (`ClaudeSDKError`).
-- This logging-free version prints nothing. The logging version of the same scripts, in `01-Agentic-Architecture-Orchestration/02-Multi-Agent-Orchestration/`, writes the model's input and output to the console and to `logs/poc1_hub_and_spoke_<date>_<time>.log`. This article's real run comes from there.
+- `.env` needs `ANTHROPIC_API_KEY`. `MODEL_ID`, `MAX_TURNS` and `MAX_BUDGET_USD` fall back to `claude-sonnet-5-5`, `20` and `1.00`. The README suggests `MAX_BUDGET_USD=1.00`, because one call runs a coordinator and two subagents. The README and `load_settings()` mention `.env.example`, but the folder has none: copy a `.env` from an earlier POC folder, as the README also suggests.
+- Every model input and output is printed to the console and written to `logs/poc1_hub_and_spoke_<date>_<time>.log`. Expect different subtopics, briefs and ids on each run; the shape of the trace stays the same.
+- The exit code is `0` when all runs finish, even if `missing_categories()` finds a miss (it's only logged). It's `1` on a setup failure, on a coordinator step that returned nothing usable (`RuntimeError` or `ValueError`), or on an SDK runtime failure (`ClaudeSDKError`).

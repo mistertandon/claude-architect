@@ -1,0 +1,1766 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>POC 1 Few-Shot Prompting</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: sticky loop-map TOC on the left, one reading column; code reads as a terminal in both themes. */
+:root {
+  --bg: #F2F4F9;
+  --surface: #FFFFFF;
+  --ink: #131A2C;
+  --muted: #5A637B;
+  --line: #D8DDE9;
+  --accent: #2E49D6;
+  --accent-soft: #E3E8FC;
+  --signal: #B45309;
+  --signal-soft: #FBEEDC;
+  --ok: #15803D;
+  --ok-soft: #DDF3E4;
+  --bad: #B91C1C;
+  --bad-soft: #FBE3E3;
+  --term-bg: #0E1424;
+  --term-fg: #D5DDF0;
+  --term-dim: #7D88A6;
+  --term-line: #1F2840;
+  --hl-key: #9DB0FF;
+  --hl-str: #F2C27B;
+  --hl-num: #7FD6B0;
+  --hl-com: #6E7896;
+  --hl-fn: #E9A2D6;
+  --c1: #2E49D6; --c2: #6D3FD6; --c3: #0F8A82; --c4: #C42F6B; --c5: #B45309; --c6: #15803D;
+  --f-display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --f-body: "IBM Plex Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0C101B; --surface: #131A2A; --ink: #E5E9F4; --muted: #97A1B9; --line: #252E45;
+    --accent: #8EA3FF; --accent-soft: #1B2447; --signal: #F4B457; --signal-soft: #2E2312;
+    --ok: #5DD39A; --ok-soft: #10291D; --bad: #FF8A8A; --bad-soft: #321616;
+    --term-bg: #070A12; --term-line: #1A2236;
+    --c1: #8EA3FF; --c2: #B49CFF; --c3: #4FD1C5; --c4: #FF7AAE; --c5: #F4B457; --c6: #5DD39A;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0C101B; --surface: #131A2A; --ink: #E5E9F4; --muted: #97A1B9; --line: #252E45;
+  --accent: #8EA3FF; --accent-soft: #1B2447; --signal: #F4B457; --signal-soft: #2E2312;
+  --ok: #5DD39A; --ok-soft: #10291D; --bad: #FF8A8A; --bad-soft: #321616;
+  --term-bg: #070A12; --term-line: #1A2236;
+  --c1: #8EA3FF; --c2: #B49CFF; --c3: #4FD1C5; --c4: #FF7AAE; --c5: #F4B457; --c6: #5DD39A;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } *, *::before, *::after { animation: none !important; transition: none !important; } }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: var(--f-body); font-size: 16.5px; line-height: 1.7;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  -webkit-font-smoothing: antialiased;
+}
+::selection { background: var(--accent); color: var(--surface); }
+a { color: var(--accent); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+
+/* progress bar */
+.progress { position: fixed; top: 0; left: 0; right: 0; height: calc(3px + env(safe-area-inset-top, 0px)); z-index: 20; pointer-events: none; }
+.progress span { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), var(--signal)); transform-origin: left; }
+
+/* hero */
+.hero { max-width: 1180px; margin: 0 auto; padding-block: 56px 40px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 40px; align-items: center; }
+.hero h1 { font-family: var(--f-display); font-weight: 800; font-size: clamp(2.1rem, 5.2vw, 3.9rem); line-height: 1.02; letter-spacing: -0.025em; margin: 0; text-wrap: balance; }
+.hero h1 .eyebrow { display: inline-block; font-family: var(--f-mono); font-weight: 600; font-size: 0.8rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent); background: var(--accent-soft); padding: 4px 10px; border-radius: 6px; margin-bottom: 18px; }
+.hero h1 .rest { display: block; }
+.meta { list-style: none; padding: 0; margin: 26px 0 0; display: flex; flex-wrap: wrap; gap: 10px; }
+.meta li { font-size: 0.86rem; line-height: 1.45; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; color: var(--muted); max-width: 100%; }
+.meta li strong { color: var(--ink); font-weight: 600; }
+
+/* orbit ornament: the loop */
+.orbit { width: 220px; aspect-ratio: 1; max-width: 100%; position: relative; }
+.orbit::before { content: ""; position: absolute; inset: 0; border-radius: 50%; border: 1.5px dashed var(--line); }
+.orbit::after { content: ""; position: absolute; inset: 34px; border-radius: 50%; border: 1.5px solid var(--accent); opacity: .35; }
+.orbit .dot { position: absolute; inset: 0; animation: spin 6s linear infinite; }
+.orbit .dot::before { content: ""; position: absolute; top: -7px; left: calc(50% - 7px); width: 14px; height: 14px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 6px var(--accent-soft); }
+.orbit .core { position: absolute; inset: 78px; border-radius: 50%; background: var(--signal); box-shadow: 0 0 0 10px var(--signal-soft); animation: pulse 6s ease-in-out infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes pulse { 0%, 85%, 100% { transform: scale(1); } 92% { transform: scale(1.15); } }
+
+/* shell */
+.shell { max-width: 1180px; margin: 0 auto; display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 56px; padding-block: 0 96px; }
+.toc { position: sticky; top: calc(24px + env(safe-area-inset-top, 0px)); align-self: start; max-height: calc(100vh - 48px); overflow-y: auto; padding-right: 6px; }
+.toc summary { font-family: var(--f-mono); font-size: 0.72rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); cursor: pointer; list-style: none; padding-block: 6px; }
+.toc summary::-webkit-details-marker { display: none; }
+.toc ol { list-style: none; margin: 8px 0 0; padding: 0; border-left: 2px solid var(--line); }
+.toc a { display: block; padding: 6px 0 6px 14px; margin-left: -2px; border-left: 2px solid transparent; color: var(--muted); text-decoration: none; font-size: 0.9rem; line-height: 1.35; transition: color .15s, border-color .15s; }
+.toc a:hover { color: var(--ink); }
+.toc a.active { color: var(--accent); border-left-color: var(--accent); font-weight: 500; }
+.toc a.sub { padding-left: 28px; font-size: 0.82rem; }
+
+/* article */
+article { min-width: 0; max-width: 780px; }
+article > * { margin-block: 0 1.1em; }
+article h2 { font-family: var(--f-display); font-weight: 800; font-size: clamp(1.6rem, 3.2vw, 2.2rem); line-height: 1.12; letter-spacing: -0.02em; margin: 2.6em 0 0.8em; padding-top: 1em; border-top: 1px solid var(--line); text-wrap: balance; scroll-margin-top: 24px; }
+article h2:first-of-type { margin-top: 0.4em; }
+article h3 { font-family: var(--f-display); font-weight: 700; font-size: 1.32rem; line-height: 1.25; letter-spacing: -0.01em; margin: 2em 0 0.6em; text-wrap: balance; scroll-margin-top: 24px; }
+article h4 { font-family: var(--f-mono); font-weight: 600; font-size: 0.95rem; margin: 1.8em 0 0.5em; color: var(--ink); scroll-margin-top: 24px; }
+.num { display: inline-block; font-family: var(--f-mono); font-weight: 600; color: var(--accent); margin-right: 0.35em; font-size: 0.72em; vertical-align: 0.18em; letter-spacing: 0; }
+article h3 .num { font-size: 0.78em; vertical-align: 0.08em; }
+article p, article li { max-width: 68ch; }
+article strong { font-weight: 600; }
+article ul, article ol { padding-left: 1.3em; }
+article li { margin-block: 0.3em; }
+article li::marker { color: var(--accent); }
+hr { border: 0; height: 1px; background: var(--line); margin: 2.4em 0; }
+hr:has(+ h2), hr:first-child { display: none; }
+
+code { font-family: var(--f-mono); font-size: 0.86em; background: var(--accent-soft); color: var(--ink); padding: 0.1em 0.38em; border-radius: 5px; overflow-wrap: anywhere; }
+
+/* terminal code blocks */
+.code { position: relative; background: var(--term-bg); border-radius: 12px; border: 1px solid var(--term-line); margin-block: 0 1.4em; overflow: hidden; }
+.code-bar { display: flex; align-items: center; gap: 8px; padding: 9px 12px 9px 14px; border-bottom: 1px solid var(--term-line); }
+.code-bar i { width: 10px; height: 10px; border-radius: 50%; background: var(--term-line); display: block; }
+.code-bar .lang { margin-left: 6px; font-family: var(--f-mono); font-size: 0.72rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--term-dim); flex: 1; }
+.code-bar button { font-family: var(--f-mono); font-size: 0.72rem; color: var(--term-dim); background: transparent; border: 1px solid var(--term-line); border-radius: 6px; padding: 3px 9px; cursor: pointer; }
+.code-bar button:hover { color: var(--term-fg); border-color: var(--term-dim); }
+.code pre { margin: 0; padding: 16px 18px 18px; overflow-x: auto; }
+.code pre code { background: none; padding: 0; color: var(--term-fg); font-size: 0.82rem; line-height: 1.6; overflow-wrap: normal; white-space: pre; border-radius: 0; }
+.hljs-keyword, .hljs-built_in, .hljs-literal { color: var(--hl-key); }
+.hljs-string { color: var(--hl-str); }
+.hljs-number { color: var(--hl-num); }
+.hljs-comment { color: var(--hl-com); font-style: italic; }
+.hljs-title, .hljs-title.function_ { color: var(--hl-fn); }
+.hljs-meta { color: var(--hl-num); }
+.hljs-params { color: var(--term-fg); }
+
+/* tables */
+.table-wrap { overflow-x: auto; margin-block: 0 1.5em; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 0.9rem; line-height: 1.5; font-variant-numeric: tabular-nums; }
+th { text-align: left; font-family: var(--f-mono); font-size: 0.72rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); background: var(--bg); padding: 11px 14px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+td { padding: 11px 14px; border-bottom: 1px solid var(--line); vertical-align: top; min-width: 120px; }
+tr:last-child td { border-bottom: 0; }
+tbody tr:hover td { background: var(--accent-soft); }
+td code { font-size: 0.82em; }
+
+/* callouts */
+blockquote { margin-inline: 0; padding: 14px 18px; background: var(--signal-soft); border-radius: 12px; border: 1px solid color-mix(in srgb, var(--signal) 30%, transparent); }
+blockquote p { margin: 0; }
+blockquote strong:first-child { color: var(--signal); }
+
+/* scenarios */
+.scenario { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 22px 24px 18px; margin-block: 0 22px; }
+.scenario > * { margin-block: 0 0.9em; }
+.scenario-head { font-family: var(--f-display); font-size: 1.18rem; line-height: 1.3; }
+.scenario-head strong { font-weight: 700; }
+.options { list-style: none; padding: 0; display: grid; gap: 8px; }
+.options li { max-width: none; margin: 0; display: flex; gap: 12px; align-items: baseline; padding: 10px 14px; border: 1px solid var(--line); border-radius: 10px; cursor: pointer; transition: border-color .15s, background .15s; }
+.options li:hover { border-color: var(--accent); }
+.opt-key { flex: none; font-family: var(--f-mono); font-weight: 600; font-size: 0.85rem; color: var(--accent); }
+.options li.correct { border-color: var(--ok); background: var(--ok-soft); }
+.options li.correct .opt-key { color: var(--ok); }
+.options li.wrong { border-color: var(--bad); background: var(--bad-soft); }
+.options li.wrong .opt-key { color: var(--bad); }
+.answer summary { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-family: var(--f-mono); font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); padding: 6px 12px; border: 1px dashed var(--accent); border-radius: 8px; list-style: none; }
+.answer summary::-webkit-details-marker { display: none; }
+.answer[open] summary { display: none; }
+.answer p { margin: 0; padding: 12px 16px; background: var(--ok-soft); border-radius: 10px; max-width: none; }
+.answer p > strong:first-child { color: var(--ok); }
+
+/* ---------- colour + pill layer ---------- */
+.hero { position: relative; }
+.hero::before { content: ""; position: absolute; inset: 0 -10% 0 -10%; z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(40% 60% at 8% 30%, color-mix(in srgb, var(--c2) 16%, transparent), transparent 70%),
+    radial-gradient(35% 55% at 70% 20%, color-mix(in srgb, var(--c3) 14%, transparent), transparent 70%),
+    radial-gradient(30% 50% at 92% 80%, color-mix(in srgb, var(--c4) 12%, transparent), transparent 70%); }
+.hero h1 .rest { background: linear-gradient(100deg, var(--ink) 30%, var(--c2) 75%, var(--c4)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.hero h1 .eyebrow { border-radius: 999px; padding: 5px 14px; }
+.meta li { border-radius: 999px; padding: 7px 16px; }
+.meta li:nth-child(1) { background: color-mix(in srgb, var(--c1) 12%, var(--surface)); border-color: color-mix(in srgb, var(--c1) 35%, transparent); }
+.meta li:nth-child(2) { background: color-mix(in srgb, var(--c2) 12%, var(--surface)); border-color: color-mix(in srgb, var(--c2) 35%, transparent); }
+.meta li:nth-child(3) { background: color-mix(in srgb, var(--c3) 12%, var(--surface)); border-color: color-mix(in srgb, var(--c3) 35%, transparent); }
+.meta li:nth-child(1) strong { color: var(--c1); }
+.meta li:nth-child(2) strong { color: var(--c2); }
+.meta li:nth-child(3) strong { color: var(--c3); }
+
+.sec { --sec: var(--c1); --sec-soft: color-mix(in srgb, var(--sec) 13%, var(--surface)); }
+.sec > h2 { border-top: 0; padding-top: 0; position: relative; }
+.sec > h2::before { content: ""; display: block; height: 4px; width: 100%; border-radius: 999px; margin-bottom: 1.1em;
+  background: linear-gradient(90deg, var(--sec), color-mix(in srgb, var(--sec) 10%, transparent)); }
+.sec h2 .num { background: var(--sec); color: var(--surface); padding: 3px 12px; border-radius: 999px; font-size: 0.58em; vertical-align: 0.3em; margin-right: 0.5em; }
+.sec h3 .num { background: var(--sec-soft); color: var(--sec); padding: 2px 10px; border-radius: 999px; font-size: 0.7em; vertical-align: 0.12em; }
+.sec h4 { display: inline-block; background: var(--sec-soft); color: var(--sec); padding: 5px 14px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--sec) 30%, transparent); }
+.sec h4 code { background: transparent; border: 0; color: inherit; padding: 0; }
+.sec li::marker { color: var(--sec); }
+.sec .table-wrap { border-color: color-mix(in srgb, var(--sec) 28%, var(--line)); }
+.sec th { background: var(--sec-soft); color: var(--sec); }
+.sec tbody tr:nth-child(even) td { background: color-mix(in srgb, var(--sec) 4%, var(--surface)); }
+.sec tbody tr:hover td { background: var(--sec-soft); }
+
+/* numbered lists as pill counters */
+.sec ol { list-style: none; padding-left: 0; counter-reset: n; display: grid; gap: 10px; }
+.sec ol > li { counter-increment: n; position: relative; padding-left: 44px; margin: 0; }
+.sec ol > li::before { content: counter(n); position: absolute; left: 0; top: 0.12em; min-width: 30px; height: 26px; display: grid; place-items: center;
+  border-radius: 999px; background: var(--sec); color: var(--surface); font-family: var(--f-mono); font-size: 0.78rem; font-weight: 600; }
+
+/* inline code pills, colour-coded by meaning */
+article :not(pre) > code { border-radius: 999px; padding: 0.08em 0.6em; border: 1px solid var(--line); background: var(--surface);
+  -webkit-box-decoration-break: clone; box-decoration-break: clone; white-space: normal; }
+code.k-ok   { color: var(--c6); background: color-mix(in srgb, var(--c6) 12%, var(--surface)); border-color: color-mix(in srgb, var(--c6) 35%, transparent); }
+code.k-bad  { color: var(--c4); background: color-mix(in srgb, var(--c4) 11%, var(--surface)); border-color: color-mix(in srgb, var(--c4) 35%, transparent); }
+code.k-tool { color: var(--c1); background: color-mix(in srgb, var(--c1) 11%, var(--surface)); border-color: color-mix(in srgb, var(--c1) 35%, transparent); }
+code.k-cap  { color: var(--c5); background: color-mix(in srgb, var(--c5) 12%, var(--surface)); border-color: color-mix(in srgb, var(--c5) 35%, transparent); }
+code.k-msg  { color: var(--c2); background: color-mix(in srgb, var(--c2) 11%, var(--surface)); border-color: color-mix(in srgb, var(--c2) 35%, transparent); }
+code.k-fn   { color: var(--c3); background: color-mix(in srgb, var(--c3) 11%, var(--surface)); border-color: color-mix(in srgb, var(--c3) 35%, transparent); }
+.legend { display: flex; flex-wrap: wrap; gap: 8px; margin: 22px 0 0; padding: 0; list-style: none; }
+.legend li { font-family: var(--f-mono); font-size: 0.72rem; }
+.legend code { font-size: 0.72rem; }
+
+/* code bar language pill */
+.code-bar .lang { flex: 0 0 auto; padding: 2px 10px; border-radius: 999px; background: var(--term-line); }
+.code-bar .lang.python { color: var(--c2); }
+.code-bar .lang.bash { color: var(--c3); }
+.code-bar .spacer { flex: 1; }
+.code-bar button { border-radius: 999px; padding: 3px 12px; }
+.code-bar i:nth-child(1) { background: #E5626A; } .code-bar i:nth-child(2) { background: #E6B450; } .code-bar i:nth-child(3) { background: #5DBE7E; }
+
+/* TOC dots */
+.toc a { display: flex; gap: 10px; align-items: baseline; }
+.toc a .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--sec, var(--line)); transform: translateY(-1px); }
+.toc a.sub .dot { width: 5px; height: 5px; opacity: .7; }
+.toc a.active { background: color-mix(in srgb, var(--sec, var(--accent)) 12%, transparent); border-radius: 0 999px 999px 0; color: var(--sec, var(--accent)); border-left-color: var(--sec, var(--accent)); }
+
+/* scenarios & answers */
+.scenario { border-color: color-mix(in srgb, var(--sec) 30%, var(--line)); background:
+  linear-gradient(160deg, color-mix(in srgb, var(--sec) 7%, var(--surface)), var(--surface) 45%); }
+.scenario-head .pill { display: inline-block; font-family: var(--f-mono); font-size: 0.72rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+  background: var(--sec); color: var(--surface); padding: 4px 12px; border-radius: 999px; vertical-align: 0.2em; margin-right: 8px; }
+.options li { border-radius: 999px; padding: 10px 18px; }
+.opt-key { display: inline-grid; place-items: center; min-width: 30px; height: 24px; border-radius: 999px; background: color-mix(in srgb, var(--sec) 14%, var(--surface)); color: var(--sec); font-size: 0.78rem; }
+.options li.correct .opt-key { background: var(--ok); color: var(--surface); }
+.options li.wrong .opt-key { background: var(--bad); color: var(--surface); }
+.answer summary { border-radius: 999px; padding: 7px 16px; border-color: var(--sec); color: var(--sec); }
+.answer p { border-radius: 16px; }
+.answer p > strong:first-child { background: var(--ok); color: var(--surface); padding: 2px 10px; border-radius: 999px; }
+blockquote { border-radius: 18px; }
+blockquote strong:first-child { background: var(--signal); color: var(--surface); padding: 1px 10px; border-radius: 999px; }
+
+.ex-hint { font-family: var(--f-mono); font-size: 0.75rem; color: var(--muted); margin-top: -4px; }
+
+@media (max-width: 1000px) {
+  .shell { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .toc { position: static; max-height: none; border: 1px solid var(--line); border-radius: 12px; padding: 8px 14px; background: var(--surface); }
+  .hero { grid-template-columns: minmax(0, 1fr); padding-block: 36px 24px; }
+  .orbit { display: none; }
+}
+@media (max-width: 520px) {
+  body { font-size: 15.5px; }
+  .scenario { padding: 18px 16px 12px; }
+}
+</style>
+
+<div class="progress" aria-hidden="true"><span id="bar"></span></div>
+<header class="hero" id="hero">
+  <div id="hero-text"></div>
+  <div class="orbit" aria-hidden="true"><div class="dot"></div><div class="core"></div></div>
+</header>
+<div class="shell">
+  <nav class="toc" aria-label="Contents">
+    <details id="toc-details" open>
+      <summary>Contents</summary>
+      <ol id="toc"></ol>
+    </details>
+  </nav>
+  <article id="article"></article>
+</div>
+
+<script type="text/markdown" id="src"># POC 1: Diagnose, Then Show, Don't Tell
+
+> **File:** `poc1_few_shot.py` (with `fewshot_setup.py` and `common.py`)
+> **Domain:** 04 Prompt Engineering & Structured Output → 02 Few-Shot Prompting
+> **SDK:** Claude Agent SDK for Python (`claude-agent-sdk >=0.2.174,<0.3`)
+> **Page:** https://claude.ai/artifact/L1z2YuPVGoWVZEGj6bAz5Y
+
+---
+
+## 1. What this POC proves
+
+This POC runs one A/B/C experiment. The same detailed extraction prompt goes to Claude three ways (no examples, examples as input/output pairs, examples with their reasoning) over the same 5 invoices in 3 structures. A scorer checks every field against known values, and a report sorts the problems into "fixed by examples" and "needs another technique". Every claim below is checked against one real run: `logs/poc1_few_shot_20261114_022842.log`.
+
+| # | Idea | Where it shows up in the code |
+|---|------|------------------------------|
+| 1 | **Baseline first.** Detailed instructions with no examples are the control arm. Only the examples change between arms, so any difference comes from them. | `BASE_PROMPT`; `PAIRS_PROMPT` and `FEWSHOT_PROMPT` both start with it |
+| 2 | **Diagnose before you prescribe.** The base arm's failures are tabulated by field and document structure, and each failing structure is mapped to the example that targets it. | `main_report()`: the `failure table` and `diagnosis:` lines |
+| 3 | **Few-shot examples are text in the system prompt.** Three invoices that are not in the test set, one per structure (table, narrative, mixed). | `EXAMPLES`, `examples_block()` in `fewshot_setup.py` |
+| 4 | **Examples with reasoning vs bare pairs.** The `few-shot` arm adds a `<reasoning>` element to each example; the `pairs` arm leaves it out. | `examples_block(with_reasoning)` |
+| 5 | **Measure, don't eyeball.** Empty-field rate, ISO-date consistency and field accuracy per arm and per structure. | `score()`, `cells()`, `correct()`, `iso_dates()`, `accuracy()` |
+| 6 | **Examples don't fix everything.** Missing data, a wrong sum in the source and malformed JSON each need another technique (nullable schema, validation loop, tool use). | the 6 `matrix ...` lines in `main_report()` |
+| 7 | **The output channel is held constant.** Every arm returns schema-validated JSON through `output_format`, so a JSON syntax error can't be mistaken for an example failure. | `build_extract_options()` |
+
+The pattern in one line:
+
+```
+same BASE_PROMPT ─┬─ + nothing                     ─▶ base     ─┐
+                  ├─ + 3 examples (doc → JSON)      ─▶ pairs    ─┼─▶ score every field ─▶ failure table ─▶ comparison ─▶ decision matrix
+                  └─ + 3 examples (doc → why → JSON) ─▶ few-shot ─┘
+```
+
+**What the real run showed, in one line:** the base arm was already 24/24, so the examples had no failures to fix. They still changed the output: with examples, Claude title-cased the vendor names the way the examples did, against the instruction "as written". Section 5 has the details.
+
+---
+
+## 2. The files involved
+
+```
+02-Few-Shot-Prompting/
+├── .env                 ← ANTHROPIC_API_KEY, MODEL_ID, MAX_TURNS, MAX_BUDGET_USD
+├── .env.example         ← the same keys, with placeholder values
+├── requirements.txt     ← claude-agent-sdk >=0.2.174,<0.3 and python-dotenv
+├── common.py            ← Settings, load_settings(), setup_logging(), log_model_io()
+├── fewshot_setup.py     ← 5 documents + TRUTH, EXTRACTION_SCHEMA, BASE_PROMPT, 3 EXAMPLES, the arm prompts,
+│                          build_extract_options(), extract(), score()
+├── poc1_few_shot.py     ← entry point: 3 arms × 5 documents = 15 query() calls, then the report
+├── README.md
+└── logs/
+    └── poc1_few_shot_20261114_022842.log   ← the real run used in sections 3.2 and 5
+```
+
+Every snippet in this article is copied from these files, logging statements included. Each logging statement is named with the log line tag it writes, so you can find its output in the log file.
+
+`poc1_few_shot.py` is 147 lines because the experiment's material lives in `fewshot_setup.py`:
+- `common.py` covers **configuration and observability**: which model, the turn and budget caps, and one log line per model input or output.
+- `fewshot_setup.py` covers **the test material and the one call**: documents and their known values, the schema, the three prompts, the options, `extract()` and the scorer.
+- `poc1_few_shot.py` covers **the experiment**: run each arm, then the failure table, the comparison and the decision matrix.
+
+---
+
+## 3. End-to-end execution flow
+
+### 3.1 The big picture
+
+```
+python poc1_few_shot.py
+        │
+        ▼
+asyncio.run(main())                                                     [poc1_few_shot.py]
+        │
+        ├─▶ load_settings()                                             [common.py]
+        │      └─ .env → Settings(model_id, max_turns, max_budget_usd), frozen
+        ├─▶ setup_logging("poc1_few_shot")                              [common.py]
+        │      └─ console + logs/poc1_few_shot_<date>_<time>.log, lines "HH:MM:SS  message"
+        │
+        ├─▶ for label, system_prompt in ARMS:          base → pairs → few-shot
+        │      └─ run_arm(settings, label, system_prompt)
+        │            ├─ log.info("MODEL INPUT   system ...")               → log: system (once per arm)
+        │            └─ for doc_id in DOCUMENTS:      T1, T2, N1, N2, M1
+        │                  ├─ extract(settings, system_prompt, doc_id)   [fewshot_setup.py] → one query() call
+        │                  ├─ score(doc_id, data)                         [fewshot_setup.py] → verdict per field
+        │                  └─ log.info("%-8s %s (%s): %s", ...)           → log: "<arm> <doc> (<structure>): ..."
+        │
+        └─▶ main_report(scores)                                          [poc1_few_shot.py]
+               ├─ 5 × "failure table <field> ..."  + "diagnosis: ..."    (base arm only)
+               ├─ per arm: "<arm> empty ... ISO dates ... accuracy ..."  + "<arm> by structure: ..."
+               ├─ "Same instructions in every arm: ..." + "reasoning vs pairs ..."
+               └─ 6 × "matrix ..."
+```
+
+All 15 extractions go through the same function. This is what happens inside it; the right-hand column names the log line each step writes.
+
+```
+extract(settings, system_prompt, doc_id)                                              [fewshot_setup.py]
+   │
+   ├─ prompt = "Extract the invoice below.\n\n<document>\n...\n</document>"
+   ├─ log.info("MODEL INPUT   prompt ...")                                         → log: prompt
+   │
+   └─▶ async for message in query(prompt=prompt, options=build_extract_options(...)):
+          │
+          │   ┌──────────────── SDK-owned: one NEW session per call ──────────────────────┐
+          │   │ starts the bundled Claude Code with system_prompt = the arm's prompt      │
+          │   │ Claude reads the document (may think: adaptive thinking, summarized)       │  → log: thinking / text
+          │   │ Claude calls the built-in StructuredOutput tool with the JSON              │  → log: structured
+          │   │ the SDK validates it against EXTRACTION_SCHEMA → tool_result               │  → log: tool_result
+          │   │ yields ResultMessage(subtype="success", structured_output=the JSON)        │  → log: stop_reason
+          │   └───────────────────────────────────────────────────────────────────────────┘
+          │
+          ├─ log_model_io(message)   writes the log lines marked above
+          ├─ ResultMessage with subtype "success" → data = message.structured_output
+          └─ ResultError → log.error("The extraction failed: %s")                  → log: (none in this run)
+   return data   (dict, or None)
+```
+
+### 3.2 Messages your `async for` receives (the `few-shot` arm, real output)
+
+The values below come from the real run on 2026-11-14, recorded in `logs/poc1_few_shot_20261114_022842.log`. The log holds model input, model output and the POC's own report lines. Each log line comes from one statement in the code:
+
+| Log line tag | Message class yielded by `query()` | Field logged | Written by |
+|--------------|------------------------------------|--------------|------------|
+| `MODEL INPUT   system` | *(none: it's the `system_prompt` passed to `run_arm()`)* | `system_prompt` | `log.info("MODEL INPUT   system ...")` in `run_arm()` (`poc1_few_shot.py`) |
+| `MODEL INPUT   prompt` | *(none: it's the `prompt` built in `extract()`)* | `prompt` | `log.info("MODEL INPUT   prompt ...")` in `extract()` (`fewshot_setup.py`) |
+| `MODEL OUTPUT  thinking` | `AssistantMessage` → `ThinkingBlock` | `block.thinking`, only when non-empty | `log_model_io()` (`common.py`) |
+| `MODEL OUTPUT  text` | `AssistantMessage` → `TextBlock` | `block.text` | `log_model_io()`. Once in this log (base, M1) |
+| `MODEL OUTPUT  structured` | `AssistantMessage` → `ToolUseBlock` named `StructuredOutput` | `block.input`, `block.id` | `log_model_io()` |
+| `MODEL OUTPUT  tool_use` | `AssistantMessage` → any other `ToolUseBlock` | `block.name`, `block.input`, `block.id` | `log_model_io()`. None in this log (`tools=[]`) |
+| `MODEL INPUT   tool_result` | `UserMessage` → `ToolResultBlock` | `block.content`, `block.tool_use_id`, `block.is_error` | `log_model_io()` |
+| `MODEL OUTPUT  stop_reason` | `ResultMessage` | `message.stop_reason`, `message.subtype` | `log_model_io()` |
+| `<arm> <doc> (<structure>): field=verdict ...` | *(none: the scorer)* | `run[doc_id]["verdicts"]` | `log.info("%-8s %s (%s): %s", ...)` in `run_arm()` |
+| `failure table ...`, `diagnosis: ...`, `<arm> empty ...`, `<arm> by structure: ...`, `Same instructions ...`, `reasoning vs pairs ...`, `matrix ...` | *(none: Python over the scores)* | the computed numbers | `log.info(...)` in `main_report()` |
+| `... no structured output`, `The extraction failed: ...`, `SDK error: ...` | *(none)* | the failure | `run_arm()`, `extract()`, `main()`. None in this log |
+| `HH:MM:SS` at the start of each line | *(none)* | the time the line was logged | the formatter in `setup_logging()` |
+
+The `few-shot` arm as it really streamed. The system prompt is logged once, then each document is one `query()` call with its own `async for` loop:
+
+```
+02:29:39  (input)                                                             log: system
+            system_prompt = You extract invoice data for the accounts-payable team ... Use only information
+                            in the document.
+
+                            Worked examples:
+                            <example>
+                            <document>
+                            BRIGHTLINE PACKAGING: INVOICE ...
+                            </document>
+                            <reasoning>Each product row is a line item with its Qty and Unit price. The Total
+                            due row is the invoice total, not a line item. Both dates are already YYYY-MM-DD.</reasoning>
+                            <extraction>{"vendor_name": "Brightline Packaging", ...}</extraction>
+                            </example>
+                            ... the narrative and the mixed example, each with its <reasoning> ...
+
+── call 1: T1 (table) ─────────────────────────────────────────────────────────
+02:29:39  (input)                                                             log: prompt
+            prompt = Extract the invoice below.\n\n<document>\nRIDGEWAY SHELVING CO.: INVOICE ...</document>
+02:29:43  AssistantMessage › ToolUseBlock                                     log: structured
+            name  = "StructuredOutput"                                        ← not logged: implied by the tag
+            input = {'vendor_name': 'Ridgeway Shelving Co.', 'invoice_date': '2026-09-14',
+                     'due_date': '2026-10-14', 'total_amount': 1330, 'line_items': [...2 items...]}
+            id    = "toolu_01F5FeyLy1o4U9PZQ1sRwyyR"
+02:29:43  UserMessage › ToolResultBlock                                       log: tool_result
+            content     = Structured output provided successfully             ← a plain string, not a list
+            tool_use_id = "toolu_01F5FeyLy1o4U9PZQ1sRwyyR"                    ← same id as the request
+            is_error    = None
+02:29:43  ResultMessage                                                       log: stop_reason
+            stop_reason = "tool_use", subtype = "success"
+02:29:45  (scorer)  few-shot T1 (table): vendor_name=correct ... line_items=correct
+
+── call 2: T2 (table) ── same shape, no thinking line; 'CloudNest Software', total 455 ──
+
+── call 3: N1 (narrative) ─────────────────────────────────────────────────────
+02:29:53  (input)                                                             log: prompt
+            prompt = Extract the invoice below. ... Summit Tentworks ... dated the third of September 2026 ...
+02:29:57  AssistantMessage › ThinkingBlock                                    log: thinking
+            thinking = I'm checking the arithmetic: 6 × 189 gives 1134, and 12 × 7.5 gives 90, so the total
+                       of 1224 holds up. Next I'm working out the due date, which is 30 days after
+                       September 3, landing on October 3.
+02:29:57  AssistantMessage › ToolUseBlock                                     log: structured
+            input = {'vendor_name': 'Summit Tentworks', 'invoice_date': '2026-09-03', 'due_date': '2026-10-03',
+                     'total_amount': 1224, 'line_items': [{'description': 'Alpine two-person tent',
+                     'quantity': 6, 'unit_price': 189}, {'description': 'Pack of aluminium stakes',
+                     'quantity': 12, 'unit_price': 7.5}]}
+            id    = "toolu_013KdMQxJrLVUH5TyoqPLFNd"
+02:29:57  UserMessage › ToolResultBlock   (tool_use_id = toolu_013KdMQxJrLVUH5TyoqPLFNd, is_error = None)
+02:29:57  ResultMessage                   stop_reason = "tool_use", subtype = "success"
+
+── call 4: N2 (narrative, no due date anywhere) ───────────────────────────────
+02:30:02  AssistantMessage › ThinkingBlock                                    log: thinking
+            thinking = I've checked the arithmetic and it holds at 674. The document doesn't state a due
+                       date, and the schema requires a string, but I'd rather not invent one, so I'm
+                       leaving that field as an empty string.
+02:30:02  AssistantMessage › ToolUseBlock                                     log: structured
+            input = {'vendor_name': 'Okafor Sign Works', 'invoice_date': '2026-09-18', 'due_date': '',
+                     'total_amount': 674, 'line_items': [...14 × 45, 2 × 22...]}
+            id    = "toolu_012C6mm9tgcCJ8fpmJR6wTkd"
+02:30:02  UserMessage › ToolResultBlock   (tool_use_id = toolu_012C6mm9tgcCJ8fpmJR6wTkd, is_error = None)
+02:30:02  ResultMessage                   stop_reason = "tool_use", subtype = "success"
+02:30:04  (scorer)  few-shot N2 (narrative): ... due_date=probe:'' ...
+
+── call 5: M1 (mixed) ── thinking: "I'm adding 15 days to 30 September 2026 ..." ─────────
+```
+
+What to notice in the real data:
+- **The examples travel in the system prompt, not in the user prompt.** The `MODEL INPUT   system` line appears once per arm (02:28:42, 02:29:08, 02:29:39), and the `prompt` lines are identical in all three arms. The `pairs` system prompt has three `<example>` blocks without `<reasoning>`; the `few-shot` one has the same three blocks with it.
+- **One document, one session.** Every call starts with its own `prompt` line and ends with its own `stop_reason` line. No call sees another document's extraction, so the only examples Claude has are the ones in the system prompt.
+- **`success` with `stop_reason = "tool_use"`, 15 times out of 15.** Claude hands in the JSON by calling the built-in `StructuredOutput` tool, and the run ends right after that call is accepted. `extract()` checks only `subtype == "success"` and reads `structured_output`.
+- **`tool_use_id` pairing.** Each `structured` line's `id` comes back as the `tool_use_id` of the next `tool_result` line. The result content is the SDK's acknowledgement `Structured output provided successfully`, a plain string, with `is_error=None`.
+- **Thinking appears where the document is hard.** The log has `thinking` lines for N1, N2 (all arms) and M1 (`pairs`, `few-shot`), and none for T1 and T2 in any arm. The options turn on adaptive thinking (`thinking={"type": "adaptive", ...}`); the log only shows that no non-empty `ThinkingBlock` text arrived for the tables, not whether an empty block did.
+- **In the base arm, M1's reasoning came as a `text` line**, not a `thinking` line: `02:29:06  MODEL OUTPUT  text  Issue date 30/09/2026 → 2026-09-30. Due 15 days later → 2026-10-15. Total 260 + 42 = 302.` It's the only `text` line in the log.
+- **The score line comes 1–2 s after `stop_reason`.** `extract()` has no `break`, so the `async for` keeps reading until the stream closes after the `ResultMessage`; only then does `run_arm()` score and log. What arrived in that gap isn't logged.
+- **Not shown:** `SystemMessage`s and other events also arrive in the stream (see the "No `break`" comment in `extract()`), but `log_model_io()` has no branch for them. Cost, session ids and turn counts are on the `ResultMessage` too, but the log records only `stop_reason` and `subtype`. The model name isn't logged either.
+
+> The `UserMessage` items are **not** typed by a human. Here they carry only the SDK's acknowledgement of the `StructuredOutput` call.
+
+---
+
+## 4. Code walkthrough
+
+The snippets follow the order in which the code runs: the script first, then the module functions it calls. Each one ends with the log lines it writes, copied from the real log (long values trimmed with `...`).
+
+### 4.1 Module docstring: the experiment in one paragraph
+
+```python
+"""
+POC 1 - Diagnose, then show, don't tell
+=======================================
+The same detailed extraction prompt runs three ways over 5 invoices in 3 structures (table, narrative, mixed):
+
+    base       detailed instructions, no examples
+    pairs      + 3 worked examples as input/output pairs
+    few-shot   + the same 3 examples, each with the reasoning behind its extraction
+
+First the base arm's failures are tabulated by document structure (diagnose before prescribing). Then the arms are
+compared, and a decision matrix names the problems examples fix and the ones that need another technique.
+
+Besides model I/O, the log shows one score line per extraction, the failure table, the comparison lines and the
+decision matrix.
+
+Run:  python poc1_few_shot.py     (3 runs, 5 query() calls each; 3 optional repeats)
+"""
+```
+
+**Why it matters:** the docstring states the experiment's design before any code.
+- **Three arms, one variable.** `pairs` and `few-shot` say "+": they add to the base prompt, they don't replace it. That is what makes the comparison fair.
+- **The order is the lesson:** diagnose (failure table), then prescribe (examples), then check what examples can't fix (decision matrix).
+- "3 runs, 5 query() calls each": 15 paid calls. The "3 optional repeats" are commented out in `ARMS` (4.3).
+
+**Agentic concept:** a controlled prompt experiment. Change one thing, keep model, schema, documents and options fixed, and score against known values.
+
+---
+
+### 4.2 Imports
+
+```python
+import asyncio
+import sys
+from collections import defaultdict
+
+from claude_agent_sdk import ClaudeSDKError
+
+from common import Settings, load_settings, log, setup_logging
+from fewshot_setup import BASE_PROMPT, DOC_TYPES, DOCUMENTS, FEWSHOT_PROMPT, FIELDS, PAIRS_PROMPT, extract, score
+```
+
+| Import | What it brings in | Why this file needs it |
+| --- | --- | --- |
+| `asyncio` | The event loop | `query()` is an async generator, so every extraction is awaited |
+| `sys` | `sys.exit()` | Passes `0` or `1` from `main()` to the shell |
+| `defaultdict` | A dict with a default value | `scores[label]` starts as an empty list, so a repeated arm appends a second run |
+| `ClaudeSDKError` | The SDK's base error | Catches SDK runtime failures (Claude Code not found, its process crashed) |
+| `Settings`, `load_settings` | From `common` | Reads `.env` into a frozen `Settings` |
+| `log`, `setup_logging` | From `common` | The `poc` logger and its console + file handlers |
+| `BASE_PROMPT`, `PAIRS_PROMPT`, `FEWSHOT_PROMPT` | From `fewshot_setup` | The three system prompts under test |
+| `DOCUMENTS`, `DOC_TYPES`, `FIELDS` | From `fewshot_setup` | The test set, each document's structure, the 5 scored fields |
+| `extract`, `score` | From `fewshot_setup` | One `query()` call per document; the field-by-field scorer |
+
+Notice what is **not** imported: no `query`, no `ClaudeAgentOptions`. The script never touches the SDK call itself. `extract()` owns it, so all three arms are guaranteed to use the same options.
+
+---
+
+### 4.3 The run table: three arms, three structures
+
+```python
+ARMS = [
+    ("base", BASE_PROMPT),  # step 1: no examples
+    ("pairs", PAIRS_PROMPT),  # the examples without their reasoning (C9)
+    ("few-shot", FEWSHOT_PROMPT),  # step 3: the examples with their reasoning
+    # ("base", BASE_PROMPT),  # optional: a second run of each arm shows format drift between runs (C4)
+    # ("pairs", PAIRS_PROMPT),  # optional
+    # ("few-shot", FEWSHOT_PROMPT),  # optional
+]
+STRUCTURES = ["table", "narrative", "mixed"]
+TARGETS = {"table": "the table example", "narrative": "the narrative example", "mixed": "the mixed example"}
+```
+
+**Why it matters:**
+- **`ARMS` is the experiment.** Each entry is `(label, system_prompt)`. The order (base → pairs → few-shot) is the order the log shows.
+- **The repeats are optional.** `ClaudeAgentOptions` has no `temperature` or `seed` (README: "the SDK has no temperature or seed"), so the only way to see run-to-run format drift is to run an arm twice. Uncomment the last three lines and `main_report()` fills the `changed between runs` column. In the real run they were commented out, so the log says `changed between runs: n/a (1 run)`.
+- **`TARGETS` is the diagnosis rule.** A failure on a narrative document points to the narrative example, and so on. `main_report()` uses it to write the `diagnosis:` line.
+
+---
+
+### 4.4 `run_arm()`: one system prompt, five documents
+
+```python
+async def run_arm(settings: Settings, label: str, system_prompt: str) -> dict[str, dict | None]:
+    """Extract every document with one system prompt; log one score line per document."""
+    log.info("MODEL INPUT   system       %s", system_prompt)  # the examples live in the system prompt
+    run = {}
+    for doc_id in DOCUMENTS:
+        data = await extract(settings, system_prompt, doc_id)
+        if data is None:
+            log.error("%s %s: no structured output", label, doc_id)
+        run[doc_id] = score(doc_id, data) if data is not None else None
+        if run[doc_id]:
+            log.info("%-8s %s (%s): %s", label, doc_id, DOC_TYPES[doc_id],
+                     " ".join(f"{f}={v}" for f, v in run[doc_id]["verdicts"].items()))
+    return run
+```
+
+**Why it matters:**
+- **`MODEL INPUT   system`** is logged once per arm, because the system prompt doesn't change within an arm. It's the only place in the log where you can see the examples.
+- **Documents run one after another,** each with its own `extract()` call. Nothing is shared between calls.
+- **`None` is a failure, not a crash.** If a call returns no structured output, the arm logs `... no structured output` and records `None`; the scorer and report skip it. The real run has no such line.
+- **The score line** (`%-8s` pads the label to 8 characters) is the bridge between model output and the report. It's the line to read first.
+
+Log lines it wrote (base arm):
+
+```
+02:28:42  MODEL INPUT   system       You extract invoice data for the accounts-payable team of Fernway Outfitters, ... Use only information in the document.
+02:28:47  base     T1 (table): vendor_name=correct invoice_date=correct due_date=correct total_amount=correct line_items=correct
+02:29:03  base     N2 (narrative): vendor_name=correct invoice_date=correct due_date=probe:'' total_amount=correct line_items=correct
+```
+
+---
+
+### 4.5 `cells()`, `correct()`, `iso_dates()`, `accuracy()`: the measures
+
+```python
+def cells(runs: list[dict]) -> list[tuple[str, str, str]]:
+    """(doc, field, verdict) of every scored field; N2's due_date is the probe, so it is left out."""
+    return [(d, f, v) for run in runs for d, s in run.items() if s for f, v in s["verdicts"].items()
+            if not v.startswith("probe")]
+
+
+def correct(runs: list[dict], docs: list[str] | None = None, fields: list[str] | None = None) -> tuple[int, int]:
+    picked = [v for d, f, v in cells(runs) if (docs is None or d in docs) and (fields is None or f in fields)]
+    return sum(v == "correct" for v in picked), len(picked)
+
+
+def iso_dates(runs: list[dict]) -> tuple[int, int]:
+    iso = [ok for run in runs for s in run.values() if s for ok in s["iso"]]
+    return sum(iso), len(iso)
+
+
+def accuracy(runs: list[dict], docs: list[str] | None = None, fields: list[str] | None = None) -> str:
+    return "%d/%d" % correct(runs, docs, fields)
+```
+
+**Why it matters:**
+- **`cells()` flattens the scores** into `(doc, field, verdict)` triples. 5 documents × 5 fields = 25, minus N2's `due_date` (the probe, which has no true value) = **24 scored fields per run**. That is the `/24` in the log.
+- **`correct()` filters** by document and field, so the same function answers "accuracy on narrative documents" and "accuracy on T2's total".
+- **`iso_dates()` counts format consistency** separately from correctness: how many non-empty dates match `YYYY-MM-DD`. N2's empty `due_date` is not counted, so the real run's denominator is 9, not 10.
+- **`accuracy()`** only formats `correct()` as `ok/n`.
+
+**Agentic concept:** evaluation by field, not by document. A document can be "mostly right"; a field is right or wrong, and a per-field tally shows where the problem sits.
+
+---
+
+### 4.6 `main_report()`: diagnose, compare, decide
+
+#### a) The failure table and the diagnosis (base arm only)
+
+```python
+def main_report(scores: dict[str, list[dict]]) -> None:
+    base = scores["base"]
+    for field in FIELDS:  # the failure table: which fields fail on which structure (C5)
+        row = []
+        for structure in STRUCTURES:
+            docs = [d for d in DOCUMENTS if DOC_TYPES[d] == structure]
+            picked = [v for d, f, v in cells(base) if f == field and d in docs]
+            row.append(f"{structure} {sum(v != 'correct' for v in picked)}/{len(picked)}")
+        log.info("failure table %-12s %s", field, ", ".join(row))
+    failing = sorted({DOC_TYPES[d] for d, f, v in cells(base) if v != "correct"}, key=STRUCTURES.index)
+    log.info("diagnosis: %s", "; ".join(f"{s} failures -> {TARGETS[s]}" for s in failing) or "no base failures")
+```
+
+**Why it matters:** this is "diagnose before you prescribe" in code. One row per field, one column per structure, each cell `failures/scored`. Then the structures that failed at all are mapped to the example that should fix them. If nothing failed, the line says so instead of inventing a prescription.
+
+Log lines it wrote:
+
+```
+02:30:09  failure table vendor_name  table 0/2, narrative 0/2, mixed 0/1
+02:30:09  failure table invoice_date table 0/2, narrative 0/2, mixed 0/1
+02:30:09  failure table due_date     table 0/2, narrative 0/1, mixed 0/1
+02:30:09  failure table total_amount table 0/2, narrative 0/2, mixed 0/1
+02:30:09  failure table line_items   table 0/2, narrative 0/2, mixed 0/1
+02:30:09  diagnosis: no base failures
+```
+
+`due_date` has `narrative 0/1`, not `0/2`: N2's due date is the probe and is left out.
+
+#### b) The comparison
+
+```python
+    for label, runs in scores.items():  # the comparison (C10, C12)
+        picked = cells(runs)
+        changed = "n/a (1 run)"
+        if len(runs) > 1:
+            changed = str(sum(runs[0][d]["data"].get(f) != runs[1][d]["data"].get(f) for d in DOCUMENTS for f in FIELDS
+                              if runs[0][d] and runs[1][d]))
+        log.info("%-8s empty %d/%d  ISO dates %d/%d  accuracy %s  changed between runs: %s", label,
+                 sum(v == "empty" for _, _, v in picked), len(picked), *iso_dates(runs), accuracy(runs), changed)
+        log.info("%-8s by structure: %s", label, ", ".join(
+            f"{s} {accuracy(runs, [d for d in DOCUMENTS if DOC_TYPES[d] == s])}" for s in STRUCTURES))
+    log.info("Same instructions in every arm: only the examples changed")  # every prompt starts with BASE_PROMPT (C11)
+    log.info("reasoning vs pairs on patterns no example shows (N1 line items, N2, T2 total): pairs %s, few-shot %s",
+             *(f"{accuracy(scores[a], ['N1'], ['line_items'])} + {accuracy(scores[a], ['N2'])} + "
+               f"{accuracy(scores[a], ['T2'], ['total_amount'])}" for a in ("pairs", "few-shot")))
+```
+
+**Why it matters:**
+- **Three measures per arm:** empty-field rate, ISO-date consistency, accuracy. Then accuracy per structure, because the expected gain is where the base arm failed.
+- **`changed between runs`** compares raw values (`data`), not verdicts, so it catches drift that the scorer would call correct. It needs a second run of the arm.
+- **`Same instructions in every arm`** is a fixed line, not a check. It's true by construction: `PAIRS_PROMPT` and `FEWSHOT_PROMPT` are `BASE_PROMPT + ...` (4.10). That's what lets the comparison say "examples beat more instructions".
+- **`reasoning vs pairs`** looks at the parts no example shows directly: N1's per-pack pricing, N2 (a short note, not a letter or a table) and T2's wrong total. If reasoning generalizes better than bare pairs, it shows here.
+
+Log lines it wrote:
+
+```
+02:30:09  base     empty 0/24  ISO dates 9/9  accuracy 24/24  changed between runs: n/a (1 run)
+02:30:09  base     by structure: table 10/10, narrative 9/9, mixed 5/5
+02:30:09  pairs    empty 0/24  ISO dates 9/9  accuracy 24/24  changed between runs: n/a (1 run)
+02:30:09  pairs    by structure: table 10/10, narrative 9/9, mixed 5/5
+02:30:09  few-shot empty 0/24  ISO dates 9/9  accuracy 24/24  changed between runs: n/a (1 run)
+02:30:09  few-shot by structure: table 10/10, narrative 9/9, mixed 5/5
+02:30:09  Same instructions in every arm: only the examples changed
+02:30:09  reasoning vs pairs on patterns no example shows (N1 line items, N2, T2 total): pairs 1/1 + 4/4 + 1/1, few-shot 1/1 + 4/4 + 1/1
+```
+
+#### c) The decision matrix
+
+```python
+    def first(arm: str, doc: str) -> dict:
+        return next((run[doc] for run in scores[arm] if run.get(doc)), {"verdicts": {}, "data": {}})
+
+    shot = scores["few-shot"]
+    rows = [  # the decision matrix (C13): problem, base, few-shot, fixed by examples?, technique (C14)
+        ("narrative extraction", correct(base, ["N1", "N2"]), correct(shot, ["N1", "N2"])),
+        ("mixed formats", correct(base, ["M1"]), correct(shot, ["M1"])),
+        ("format consistency", iso_dates(base), iso_dates(shot)),  # ISO dates among the non-empty dates
+    ]
+    for problem, (b_ok, b_n), (s_ok, s_n) in rows:
+        fixed = "already fine" if b_ok == b_n else ("yes" if s_ok / max(s_n, 1) > b_ok / max(b_n, 1) else "no")
+        log.info("matrix %-21s base %d/%d  few-shot %d/%d  fixed by examples: %s  -> few-shot examples",
+                 problem, b_ok, b_n, s_ok, s_n, fixed)
+    log.info("matrix %-21s base %s  few-shot %s  fixed by examples: no  -> nullable schema fields (topic 03)",
+             "missing data (N2 due)", first("base", "N2")["verdicts"].get("due_date"),
+             first("few-shot", "N2")["verdicts"].get("due_date"))  # empty or invented: the schema has no null (C15)
+    sums = [round(sum(i["quantity"] * i["unit_price"] for i in first(a, "T2")["data"].get("line_items", [])), 2)
+            for a in ("base", "few-shot")]
+    log.info("matrix %-21s base items %.2f vs total %s  few-shot items %.2f vs total %s  fixed by examples: no  -> "
+             "validation and retry loop (topic 04)", "sum discrepancy (T2)", sums[0],
+             first("base", "T2")["data"].get("total_amount"), sums[1], first("few-shot", "T2")["data"].get("total_amount"))
+    log.info("matrix %-21s base %d  few-shot %d calls without structured output  -> tool use / output_format (topic 03)",
+             "malformed JSON", *(sum(s is None for run in scores[a] for s in run.values()) for a in ("base", "few-shot")))
+```
+
+**Why it matters:** the matrix is the exam's "match the technique to the problem" in six rows.
+
+| Row | Measured on | Verdict comes from | Technique column |
+|-----|-------------|--------------------|------------------|
+| narrative extraction | N1 + N2 fields | the numbers: `already fine`, `yes` or `no` | few-shot examples |
+| mixed formats | M1 fields | the numbers | few-shot examples |
+| format consistency | ISO dates | the numbers | few-shot examples |
+| missing data (N2 due) | N2's raw `due_date` | **fixed text** `no` | nullable schema fields (topic 03) |
+| sum discrepancy (T2) | T2 line items vs total | **fixed text** `no` | validation and retry loop (topic 04) |
+| malformed JSON | calls with no structured output | (no verdict column) | tool use / `output_format` (topic 03) |
+
+The last three rows print the evidence, but their verdict is written into the format string. The code states the curriculum's rule ("examples can't fix these"); the evidence lets you check it. `first()` picks the first run of an arm that has the document, so the matrix works with or without the optional repeats. The `malformed JSON` row counts `base` and `few-shot` only, not `pairs`.
+
+Log lines it wrote:
+
+```
+02:30:09  matrix narrative extraction  base 9/9  few-shot 9/9  fixed by examples: already fine  -> few-shot examples
+02:30:09  matrix mixed formats         base 5/5  few-shot 5/5  fixed by examples: already fine  -> few-shot examples
+02:30:09  matrix format consistency    base 9/9  few-shot 9/9  fixed by examples: already fine  -> few-shot examples
+02:30:09  matrix missing data (N2 due) base probe:''  few-shot probe:''  fixed by examples: no  -> nullable schema fields (topic 03)
+02:30:09  matrix sum discrepancy (T2)  base items 445.00 vs total 455  few-shot items 445.00 vs total 455  fixed by examples: no  -> validation and retry loop (topic 04)
+02:30:09  matrix malformed JSON        base 0  few-shot 0 calls without structured output  -> tool use / output_format (topic 03)
+```
+
+---
+
+### 4.7 `main()` and `__main__`
+
+```python
+async def main() -> int:
+    try:
+        settings = load_settings()
+        setup_logging("poc1_few_shot")
+    except (OSError, RuntimeError) as exc:
+        print(f"Setup failed: {exc}")
+        return 1
+
+    scores = defaultdict(list)
+    for label, system_prompt in ARMS:
+        try:
+            scores[label].append(await run_arm(settings, label, system_prompt))
+        except ClaudeSDKError as exc:  # Claude Code not found, its process crashed, ...
+            log.error("SDK error: %s", exc)
+            return 1
+    main_report(scores)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(asyncio.run(main()))
+```
+
+**Why it matters:**
+- **Setup failures use `print()`,** because the logger may not exist yet (a missing `.env` fails before `setup_logging()`).
+- **`scores` is `{"base": [run], "pairs": [run], "few-shot": [run]}`**, one list per arm. A repeated arm appends a second run to the same list, which is what `changed between runs` compares.
+- **Two failure boundaries.** A `ResultError` (an error result from one call) is caught inside `extract()` and becomes `None` for that document. A `ClaudeSDKError` (the runtime itself failed) stops the whole script with exit code `1`.
+- **The report runs only after all three arms,** because every comparison needs all of them.
+
+---
+
+### 4.8 `Settings` and `load_settings()` (from `common.py`)
+
+```python
+@dataclass(frozen=True)
+class Settings:
+    model_id: str  # MODEL_ID: the Claude model that runs every extraction (the same model for every arm)
+    max_turns: int  # MAX_TURNS: safety cap on turns per extraction call
+    max_budget_usd: float  # MAX_BUDGET_USD: cost guard for a single run
+
+
+def load_settings() -> Settings:
+    """Read .env. The SDK's Claude Code process takes ANTHROPIC_API_KEY from the environment."""
+    env_file = POC_DIR / ".env"
+    if not env_file.is_file():
+        raise RuntimeError(f"{env_file} not found: copy .env.example to .env and add your API key")
+    load_dotenv(env_file, override=True)  # .env wins over variables already set in your shell
+    if os.getenv("ANTHROPIC_API_KEY", "") in ("", "your-api-key-here"):
+        raise RuntimeError(f"set ANTHROPIC_API_KEY in {env_file}")
+    try:
+        return Settings(
+            model_id=os.getenv("MODEL_ID") or "claude-sonnet-5-5",
+            max_turns=int(os.getenv("MAX_TURNS") or 5),
+            max_budget_usd=float(os.getenv("MAX_BUDGET_USD") or 0.50),
+        )
+    except ValueError as exc:
+        raise RuntimeError(f"MAX_TURNS and MAX_BUDGET_USD in .env must be numbers ({exc})") from exc
+```
+
+**Why it matters:**
+- **One model for every arm.** A model change between arms would make the comparison meaningless. `frozen=True` means no code can change a setting mid-run.
+- **The key never appears in code.** The SDK's Claude Code process reads `ANTHROPIC_API_KEY` from the environment that `load_dotenv()` filled.
+- **Defaults:** `claude-sonnet-5-5`, 5 turns, $0.50 per call. An extraction needs one turn; the cap guards against a loop of failed `StructuredOutput` attempts.
+
+---
+
+### 4.9 `setup_logging()` and `log_model_io()` (from `common.py`)
+
+```python
+def setup_logging(script_name: str) -> None:
+    """Log to the console and to logs/<script>_<time>.log, so a paid run can be re-read later."""
+    log_dir = POC_DIR / "logs"
+    log_dir.mkdir(exist_ok=True)
+    log_file = log_dir / f"{script_name}_{datetime.now():%Y%m%d_%H%M%S}.log"
+    formatter = logging.Formatter("%(asctime)s  %(message)s", datefmt="%H:%M:%S")
+    for handler in (logging.StreamHandler(sys.stdout), logging.FileHandler(log_file, encoding="utf-8")):
+        handler.setFormatter(formatter)
+        log.addHandler(handler)
+    log.setLevel(logging.INFO)
+
+
+def log_model_io(message: Any) -> None:
+    """Log the model input or output carried by one message from the query() stream."""
+    if isinstance(message, AssistantMessage):  # Claude's response = model OUTPUT
+        for block in message.content:
+            if isinstance(block, ThinkingBlock) and block.thinking:
+                log.info("MODEL OUTPUT  thinking     %s", block.thinking)
+            elif isinstance(block, TextBlock):
+                log.info("MODEL OUTPUT  text         %s", block.text)
+            elif isinstance(block, ToolUseBlock) and block.name == "StructuredOutput":
+                # output_format at work: Claude hands in its JSON through this built-in tool
+                log.info("MODEL OUTPUT  structured   %s  (id=%s)", block.input, block.id)
+            elif isinstance(block, ToolUseBlock):
+                log.info("MODEL OUTPUT  tool_use     %s %s  (id=%s)", block.name, block.input, block.id)
+
+    elif isinstance(message, UserMessage) and isinstance(message.content, list):  # tool results = model INPUT
+        for block in message.content:
+            if isinstance(block, ToolResultBlock):
+                log.info(
+                    "MODEL INPUT   tool_result  %s  (tool_use_id=%s, is_error=%s)",
+                    block.content, block.tool_use_id, block.is_error,
+                )
+
+    elif isinstance(message, ResultMessage):  # the loop has ended
+        log.info("MODEL OUTPUT  stop_reason  %s  (loop result: %s)", message.stop_reason, message.subtype)
+```
+
+**Why it matters:**
+- **The file name** `poc1_few_shot_20261114_022842.log` comes from `datetime.now()` at setup: the run started at 02:28:42, the time of the first log line.
+- **`structured` is a `ToolUseBlock` with a special name.** With `output_format`, the final JSON isn't text: Claude calls a built-in tool named `StructuredOutput`, and its `input` is the JSON. That's why the log tag is `structured`, not `tool_use`.
+- **`thinking` only when non-empty.** An empty `ThinkingBlock` writes nothing, so the log can't tell "no block" from "empty block".
+- **One line per block**, always with the `id` / `tool_use_id`, so request and result can be paired by eye.
+
+Log lines it wrote for one call (base, T1):
+
+```
+02:28:45  MODEL OUTPUT  structured   {'vendor_name': 'RIDGEWAY SHELVING CO.', 'invoice_date': '2026-09-14', 'due_date': '2026-10-14', 'total_amount': 1330, 'line_items': [...]}  (id=toolu_01RTU5MuncrS18fiXytHJRye)
+02:28:45  MODEL INPUT   tool_result  Structured output provided successfully  (tool_use_id=toolu_01RTU5MuncrS18fiXytHJRye, is_error=None)
+02:28:45  MODEL OUTPUT  stop_reason  tool_use  (loop result: success)
+```
+
+---
+
+### 4.10 The test set, the schema and the prompts (from `fewshot_setup.py`)
+
+#### a) `DOCUMENTS`, `DOC_TYPES`, `TRUTH`, `FIELDS`
+
+```python
+DOCUMENTS = {
+    "T1": ("RIDGEWAY SHELVING CO.: INVOICE\n"
+           "Invoice date: 2026-09-14 | Due date: 2026-10-14 | Bill to: Fernway Outfitters\n"
+           ...
+    "T2": ("CLOUDNEST SOFTWARE: INVOICE\n"
+           ...
+           "| Total due                        |     |            | 455.00 |"),  # the supplier's sum is 10.00 too high
+    "N1": ("Summit Tentworks\n\nDear Fernway team,\n\nthis letter is our invoice, dated the third of September 2026. "
+           ...
+    "N2": ("Okafor Sign Works, note dated 18 September 2026\n\nHi Fernway, a quick note to bill you for the "
+           ...
+    "M1": ("HOLLIS PEST CONTROL: Invoice HPC-5521\n"
+           "Issued: 30/09/2026 (dates on this invoice are DD/MM/YYYY)\n"
+           ...
+}
+DOC_TYPES = {"T1": "table", "T2": "table", "N1": "narrative", "N2": "narrative", "M1": "mixed"}
+
+TRUTH = {  # line_items as (quantity, unit_price) pairs
+    ...
+    "N2": {"vendor_name": "Okafor Sign Works", "invoice_date": "2026-09-18", "due_date": None,  # no due date at all
+           "total_amount": 674.00, "line_items": [(14, 45.00), (2, 22.00)]},
+    ...
+}
+FIELDS = ["vendor_name", "invoice_date", "due_date", "total_amount", "line_items"]
+```
+
+| Id | Structure | What makes it hard | `TRUTH` highlights |
+|----|-----------|--------------------|--------------------|
+| T1 | table | nothing: the control | 1330.00; (4, 310.00), (4, 22.50) |
+| T2 | table | the supplier's total is 10.00 more than its line items | total 455.00 as stated; items sum to 445.00 |
+| N1 | narrative | numbers and a date in words, a "free of charge" item, a due date "within thirty days" | 2026-09-03 → due 2026-10-03; the free poles are not a line item |
+| N2 | narrative | **no due date anywhere** | `due_date: None`: the fabrication probe |
+| M1 | mixed | a DD/MM/YYYY date, a billed item in a note under the table, a due date "15 days after" | 2026-09-30 → due 2026-10-15; (1, 260.00), (3, 14.00) |
+
+**Why it matters:** the same facts appear in three structures (a table row, a sentence, a note under a table), and every document has known values. Without `TRUTH` you can only say outputs "look different"; with it you can say which field is wrong on which structure.
+
+#### b) `EXTRACTION_SCHEMA`: required everywhere, nullable nowhere
+
+```python
+EXTRACTION_SCHEMA = {  # every field required and none nullable: the design before topic 03 (E2)
+    "type": "object",
+    "properties": {
+        "vendor_name": {"type": "string"},
+        "invoice_date": {"type": "string"},
+        "due_date": {"type": "string"},
+        "total_amount": {"type": "number"},
+        "line_items": {"type": "array", "items": {
+            "type": "object",
+            "properties": {"description": {"type": "string"}, "quantity": {"type": "number"},
+                           "unit_price": {"type": "number"}},
+            "required": ["description", "quantity", "unit_price"]}},
+    },
+    "required": ["vendor_name", "invoice_date", "due_date", "total_amount", "line_items"],
+}
+```
+
+**Why it matters:** this schema is deliberately the "before" design. `due_date` is a required `string` with no `null`, so for N2 Claude has only two options: invent a date, or return an empty string that looks like a value. Neither says "not in the document". In the real run Claude chose `''` in all three arms (section 5). No example can add a `null` the schema forbids; that's the topic-03 fix.
+
+**Anti-pattern it exposes:** required, non-nullable fields for data that may be absent. They force fabrication or fake blanks.
+
+#### c) `BASE_PROMPT`: detailed instructions, no examples
+
+```python
+BASE_PROMPT = (  # detailed instructions, no examples (C1)
+    "You extract invoice data for the accounts-payable team of Fernway Outfitters, an outdoor-gear store. Fill every "
+    "field from the document: vendor_name is the company that issued the invoice, as written; invoice_date is the "
+    "date the invoice was issued and due_date the date payment is due, both as YYYY-MM-DD; total_amount is the total "
+    "amount due, as a number without a currency symbol; line_items has one entry per billed product or service, with "
+    "its description, quantity and unit_price as numbers. Use only information in the document.")
+```
+
+**Why it matters:** this is a strong baseline, not a straw man. Every field has a definition, a format and a source ("billed", "as written", "YYYY-MM-DD"). The experiment asks whether examples add anything on top of good instructions. Note "vendor_name ... **as written**": section 5 shows the examples overriding exactly this instruction.
+
+#### d) `EXAMPLES` and `examples_block()`: the shots
+
+```python
+EXAMPLES = [  # 3 invoices that are NOT in the test set, one per structure (C7), each with its reasoning (C8)
+    {"structure": "table",
+     "document": ("BRIGHTLINE PACKAGING: INVOICE\nInvoice date: 2026-08-02 | Due date: 2026-09-01\n"
+                  ...
+     "reasoning": ("Each product row is a line item with its Qty and Unit price. The Total due row is the invoice "
+                   "total, not a line item. Both dates are already YYYY-MM-DD."),
+     "extraction": {"vendor_name": "Brightline Packaging", "invoice_date": "2026-08-02", "due_date": "2026-09-01",
+                    ...
+    {"structure": "narrative",
+     ...
+     "reasoning": ('This is a letter, so the facts are in sentences. "Dated the fifth of August 2026" is the invoice '
+                   "date, 2026-08-05. Numbers written as words become digits: eight lanterns at 25.00, four globes at "
+                   "6.50. The carry bags are complimentary, so nothing is billed and they are not a line item. "
+                   '"Payable within fourteen days of the invoice date" gives the due date: 2026-08-05 plus 14 days is '
+                   "2026-08-19. The total, 226.00, matches 8 x 25.00 + 4 x 6.50."),
+     ...
+    {"structure": "mixed",
+     ...
+     "reasoning": ("The header says the dates are DD/MM/YYYY, so 12/08/2026 is 12 August 2026: 2026-08-12. The table "
+                   "has one product, and the note adds a second billed item, 5 O-ring kits at 3.00. The terms give the "
+                   "due date: 2026-08-12 plus 21 days is 2026-09-02. The total, 375.00, matches 360.00 + 15.00."),
+     ...
+]
+
+
+def examples_block(with_reasoning: bool) -> str:
+    """Each example: the document, (the reasoning,) and the extraction. Pairs leave the reasoning out (C9)."""
+    return "Worked examples:\n" + "\n".join(
+        f"<example>\n<document>\n{e['document']}\n</document>\n"
+        + (f"<reasoning>{e['reasoning']}</reasoning>\n" if with_reasoning else "")
+        + f"<extraction>{json.dumps(e['extraction'])}</extraction>\n</example>" for e in EXAMPLES)
+
+
+PAIRS_PROMPT = BASE_PROMPT + "\n\n" + examples_block(False)  # input/output pairs only
+FEWSHOT_PROMPT = BASE_PROMPT + "\n\n" + examples_block(True)  # the same examples, with their reasoning
+```
+
+**Why it matters:**
+- **One example per structure** (table, narrative, mixed), each targeting the patterns the base arm is expected to miss: dates and numbers in words, a complimentary item, a relative due date, a DD/MM date, an item in a note.
+- **Not from the test set.** Different vendors and figures, so a correct test answer can't be copied from an example. The model must transfer the rule.
+- **The reasoning states the rule, not just the answer:** "complimentary, so nothing is billed and they are not a line item"; "plus 14 days is 2026-08-19"; "the total matches 8 x 25.00 + 4 x 6.50". That's what's supposed to generalize to N1's free poles and M1's 15-day terms.
+- **XML tags** (`<example>`, `<document>`, `<reasoning>`, `<extraction>`) separate the parts so Claude can't confuse an example document with the real one, which arrives in the user prompt inside its own `<document>` tag.
+- **`PAIRS_PROMPT` and `FEWSHOT_PROMPT` are `BASE_PROMPT + ...`.** No arm has more instructions than another; only the examples differ. That's the control behind the `Same instructions in every arm` line.
+
+**Note what the examples also teach:** each example's `extraction` writes the vendor in title case (`"Brightline Packaging"` for `BRIGHTLINE PACKAGING`, `"Cascade Filters Ltd"` for `CASCADE FILTERS LTD`). None of the reasoning texts mentions that choice. Section 5 shows Claude copying it.
+
+**Agentic concept:** few-shot prompting. Examples show the expected output format and the decisions behind it more reliably than more instruction text.
+
+---
+
+### 4.11 `build_extract_options()`: each option is a decision
+
+```python
+def build_extract_options(settings: Settings, system_prompt: str) -> ClaudeAgentOptions:
+    return ClaudeAgentOptions(
+        model=settings.model_id,  # one model for every arm
+        system_prompt=system_prompt,  # the ONLY thing that changes between arms: the examples live here
+        output_format={"type": "json_schema", "schema": EXTRACTION_SCHEMA},  # validated JSON: syntax never varies (E1)
+        tools=[],  # no built-in tools: the document is in the prompt
+        setting_sources=[],  # ignore ~/.claude settings, CLAUDE.md and hooks: the same run on any machine
+        env={"ENABLE_TOOL_SEARCH": "false"},  # no ToolSearch calls
+        thinking={"type": "adaptive", "display": "summarized"},  # return Claude's reasoning text (same cost)
+        max_turns=settings.max_turns,  # safety cap (01 C16)
+        max_budget_usd=settings.max_budget_usd,  # cost guard per extraction call
+    )
+```
+
+| Option | Effect | Agentic concept |
+|--------|--------|-----------------|
+| `model=settings.model_id` | Same model in every arm | Controlled experiment |
+| `system_prompt=system_prompt` | Replaces the whole system prompt with the arm's prompt | Few-shot examples as system-prompt text |
+| `output_format={"type": "json_schema", ...}` | Claude must call `StructuredOutput`; the SDK validates against the schema; the JSON lands in `ResultMessage.structured_output` | Structured output through a tool: JSON syntax can't vary between arms |
+| `tools=[]` | No built-in tools (no file reads, no shell) | Least privilege; the document is in the prompt |
+| `setting_sources=[]` | No user/project settings, `CLAUDE.md` or hooks | Reproducibility on any machine |
+| `env={"ENABLE_TOOL_SEARCH": "false"}` | No ToolSearch calls | A clean stream: only the extraction |
+| `thinking={"type": "adaptive", "display": "summarized"}` | Claude decides when to think; summaries come back as `ThinkingBlock` | Observability of the model's reasoning |
+| `max_turns=settings.max_turns` | Caps turns per call | Safety cap |
+| `max_budget_usd=settings.max_budget_usd` | Stops a call whose estimated spend passes the cap | Cost guard |
+
+**Why it matters:** `system_prompt` is the only argument that depends on the arm. If `output_format` were missing, a JSON parse error in one arm would look like "the examples made it worse", when the output channel failed. With it, the `malformed JSON` matrix row is 0 by construction.
+
+---
+
+### 4.12 `extract()`: one document, one new session
+
+```python
+async def extract(settings: Settings, system_prompt: str, doc_id: str) -> dict | None:
+    """One document = one query() = one NEW session: no other document, and no example but the prompt's."""
+    prompt = f"Extract the invoice below.\n\n<document>\n{DOCUMENTS[doc_id]}\n</document>"
+    log.info("MODEL INPUT   prompt       %s", prompt)
+    data = None
+    try:
+        async for message in query(prompt=prompt, options=build_extract_options(settings, system_prompt)):
+            log_model_io(message)
+            if isinstance(message, ResultMessage) and message.subtype == "success":
+                data = message.structured_output  # None here means no structured output: treat it as a failure
+            # No `break`: a few system events can still arrive after the ResultMessage.
+    except ResultError as exc:  # raised AFTER the error ResultMessage, e.g. error_max_structured_output_retries
+        log.error("The extraction failed: %s", exc)
+    return data
+```
+
+**Why it matters:**
+- **A new session per document.** Each `query()` starts with an empty history. Earlier extractions can't act as accidental examples, so the only shots are the ones in `system_prompt`.
+- **The user prompt is identical across arms.** Only the system prompt differs, which the log confirms.
+- **`subtype == "success"` is the completion check,** not `stop_reason`. With `output_format`, a successful run ends with `stop_reason == "tool_use"` (section 3.2).
+- **No `break`.** Events can still arrive after the `ResultMessage`; the loop reads to the end of the stream.
+- **`ResultError` after an error result.** If Claude can't produce schema-valid JSON in time, the SDK yields an error `ResultMessage` (e.g. `error_max_structured_output_retries`) and then raises. `extract()` logs it and returns `None`.
+
+Log line it wrote (`MODEL INPUT   prompt`):
+
+```
+02:29:53  MODEL INPUT   prompt       Extract the invoice below.
+
+<document>
+Summit Tentworks
+
+Dear Fernway team,
+...
+</document>
+```
+
+---
+
+### 4.13 `score()`: correct, empty, wrong, or probe
+
+```python
+ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _norm(name: str) -> str:
+    return re.sub(r"[^a-z0-9 ]", "", name.lower())
+
+
+def score(doc_id: str, data: dict) -> dict[str, Any]:
+    """Per field: correct, empty or wrong. N2's due_date has no true value: it keeps its raw value (the probe)."""
+    truth, verdicts = TRUTH[doc_id], {}
+    for field in FIELDS:
+        value = data.get(field)
+        if field == "due_date" and truth[field] is None:
+            verdicts[field] = f"probe:{value!r}"  # fabrication probe (C15)
+        elif value in ("", [], 0, None) or (isinstance(value, str) and not value.strip()):
+            verdicts[field] = "empty"
+        elif field == "vendor_name":
+            verdicts[field] = "correct" if _norm(truth[field]) in _norm(value) else "wrong"
+        elif field == "total_amount":
+            verdicts[field] = "correct" if abs(value - truth[field]) < 0.01 else "wrong"
+        elif field == "line_items":
+            pairs = sorted((round(i["quantity"], 2), round(i["unit_price"], 2)) for i in value)
+            verdicts[field] = "correct" if pairs == sorted(truth[field]) else "wrong"
+        else:
+            verdicts[field] = "correct" if value == truth[field] else "wrong"
+    dates = [data.get(f) for f in ("invoice_date", "due_date") if data.get(f)]
+    return {"verdicts": verdicts, "iso": [bool(ISO_DATE.match(d)) for d in dates], "data": data}
+```
+
+| Field | Rule | What it forgives |
+|-------|------|------------------|
+| `vendor_name` | the normalized true name is contained in the normalized value | case and punctuation (`RIDGEWAY SHELVING CO.` = `Ridgeway Shelving Co.`) |
+| dates | exact string match | nothing: `2026-10-03` only |
+| `total_amount` | within 0.01 | `1330` vs `1330.00` |
+| `line_items` | same `(quantity, unit_price)` pairs, any order | descriptions and order |
+| N2 `due_date` | not judged: `probe:<raw value>` | n/a |
+
+**Why it matters:**
+- **`empty` is separate from `wrong`.** The curriculum's symptom is "empty or wrong on narrative"; the two need different fixes.
+- **The probe keeps the raw value** (`probe:''` or `probe:'2026-10-18'`), so you see exactly how Claude handled a value that doesn't exist.
+- **`iso` is measured on the raw dates,** separately from correctness.
+- **`data` is kept,** so the report can compare raw values between runs and sum T2's line items.
+
+**Trade-off to know:** a forgiving scorer hides surface drift. `_norm()` lowercases, so the vendor-name casing change in section 5 scores `correct` in every arm. To catch it, compare raw values (as `changed between runs` does) or tighten the rule.
+
+---
+
+## 5. Turn-by-turn trace of each run (real output)
+
+Each arm is one run of `run_arm()`: one `system` line, then 5 calls. Every call is one turn: Claude calls `StructuredOutput` and the session ends. Times are from `logs/poc1_few_shot_20261114_022842.log`.
+
+### 5.1 Run 1: `base` (no examples)
+
+```
+02:28:42  MODEL INPUT   system       You extract invoice data for ... Use only information in the document.
+02:28:45  MODEL OUTPUT  structured   {'vendor_name': 'RIDGEWAY SHELVING CO.', 'invoice_date': '2026-09-14', 'due_date': '2026-10-14', 'total_amount': 1330, 'line_items': [{'description': 'Steel shelving unit, 5-tier', 'quantity': 4, 'unit_price': 310}, {'description': 'Corner bracket kit', 'quantity': 4, 'unit_price': 22.5}]}  (id=toolu_01RTU5MuncrS18fiXytHJRye)
+02:28:47  base     T1 (table): vendor_name=correct invoice_date=correct due_date=correct total_amount=correct line_items=correct
+02:28:51  MODEL OUTPUT  structured   {'vendor_name': 'CLOUDNEST SOFTWARE', 'invoice_date': '2026-10-01', 'due_date': '2026-10-31', 'total_amount': 455, ...}  (id=toolu_01NGbDdSBnbXaWZd3FogHj1W)
+02:28:52  base     T2 (table): vendor_name=correct ... line_items=correct
+02:28:56  MODEL OUTPUT  thinking     I'm checking the arithmetic: 6 times 189 is 1134, 12 times 7.5 is 90, and the total comes to 1224, which matches. The due date works out to 2026-10-03, 30 days after 2026-09-03. I'm deciding whether the free poles belong in the list; since only billed products get an entry, I'll leave them out.
+02:28:56  MODEL OUTPUT  structured   {'vendor_name': 'Summit Tentworks', 'invoice_date': '2026-09-03', 'due_date': '2026-10-03', 'total_amount': 1224, ...}  (id=toolu_01AhN7My8gbr27YjV2Yy4D4P)
+02:28:57  base     N1 (narrative): vendor_name=correct ... line_items=correct
+02:29:02  MODEL OUTPUT  thinking     I've checked the arithmetic and the total is 674. The document doesn't give a due date, and since it's a required field I shouldn't make one up, so I'll leave it as an empty string and tell the user.
+02:29:02  MODEL OUTPUT  structured   {'vendor_name': 'Okafor Sign Works', 'invoice_date': '2026-09-18', 'due_date': '', 'total_amount': 674, 'line_items': [{'description': 'Trail sign installation', 'quantity': 14, 'unit_price': 45}, {'description': 'Mounting hardware bag', 'quantity': 2, 'unit_price': 22}]}  (id=toolu_01GBxLpLFMGSvBRiYL84J2Aj)
+02:29:03  base     N2 (narrative): vendor_name=correct invoice_date=correct due_date=probe:'' total_amount=correct line_items=correct
+02:29:06  MODEL OUTPUT  text         Issue date 30/09/2026 → 2026-09-30. Due 15 days later → 2026-10-15. Total 260 + 42 = 302.
+02:29:07  MODEL OUTPUT  structured   {'vendor_name': 'HOLLIS PEST CONTROL', 'invoice_date': '2026-09-30', 'due_date': '2026-10-15', 'total_amount': 302, 'line_items': [..., {'description': 'Replacement bait stations', 'quantity': 3, 'unit_price': 14}]}  (id=toolu_01MSRMXG57yKni56V4sQTt5y)
+02:29:08  base     M1 (mixed): vendor_name=correct ... line_items=correct
+```
+
+(The `prompt`, `tool_result` and `stop_reason` lines are left out; each call has one of each, with `is_error=None` and `tool_use  (loop result: success)`.)
+
+| Variable / field (code) | Value in the real run |
+|-------------------------|-----------------------|
+| `system_prompt` (`run_arm()`) | `BASE_PROMPT`, no examples |
+| `message.subtype` (each `ResultMessage`) | `success` × 5 |
+| `message.stop_reason` | `tool_use` × 5 |
+| `data = message.structured_output` | 5 dicts, never `None` |
+| `run["N2"]["verdicts"]["due_date"]` | `probe:''` |
+| `run[d]["iso"]` over all docs | 9 × `True` (N2's `''` is not counted) |
+| `ResultError` / `ClaudeSDKError` | not raised |
+| Wall time | 02:28:42 → 02:29:08, about 26 s |
+
+Lessons from the real data:
+- **The baseline had no consistency problem.** All 24 scored fields were correct, including everything the examples were written for: numbers and a date in words (N1), the free poles left out (N1), the 30-day and 15-day due dates (N1, M1), the DD/MM date (M1) and the bait stations from the note (M1). The curriculum expects failures here; this model on these 5 short documents produced none. The README warns about this: "With a strong model the base arm may already be close to 100%".
+- **"As written" was taken literally.** The base arm returned `RIDGEWAY SHELVING CO.`, `CLOUDNEST SOFTWARE` and `HOLLIS PEST CONTROL`, in capitals, as the headers print them.
+- **N2: no fabrication, but no honest null either.** The thinking says "I shouldn't make one up, so I'll leave it as an empty string and tell the user". No `text` line follows: with `output_format` the answer goes to `StructuredOutput`, and the empty string is the only signal downstream code gets.
+- **T2's total was copied, not checked.** `total_amount: 455` while the line items sum to 445; nothing in the output flags the difference.
+
+### 5.2 Run 2: `pairs` (examples without reasoning)
+
+```
+02:29:08  MODEL INPUT   system       You extract invoice data ... Use only information in the document.
+
+Worked examples:
+<example>
+<document>
+BRIGHTLINE PACKAGING: INVOICE
+...
+</document>
+<extraction>{"vendor_name": "Brightline Packaging", "invoice_date": "2026-08-02", ...}</extraction>
+</example>
+...
+02:29:15  MODEL OUTPUT  structured   {'vendor_name': 'Ridgeway Shelving Co.', 'invoice_date': '2026-09-14', ...}  (id=toolu_01FqWkwyqDSgiDxsUuLQjDFj)
+02:29:16  pairs    T1 (table): vendor_name=correct ... line_items=correct
+02:29:20  MODEL OUTPUT  structured   {'vendor_name': 'CloudNest Software', 'invoice_date': '2026-10-01', 'due_date': '2026-10-31', 'total_amount': 455, ...}  (id=toolu_01G7pq7ySjSH6wsXx6JCD2f7)
+02:29:25  MODEL OUTPUT  thinking     I'm checking the arithmetic: 6 times 189 is 1134, 12 times 7.5 is 90, and the total comes to 1224, which matches. I also note the due date is 2026-10-03.
+02:29:31  MODEL OUTPUT  thinking     I've checked the arithmetic and it comes out to 674, which matches. The document doesn't give a due date, and the field is required, but I can't make one up, so I'll leave it as an empty string.
+02:29:31  MODEL OUTPUT  structured   {'vendor_name': 'Okafor Sign Works', 'invoice_date': '2026-09-18', 'due_date': '', 'total_amount': 674, 'line_items': [..., {'description': 'Bag of mounting hardware', 'quantity': 2, 'unit_price': 22}]}  (id=toolu_01XUFGiVG9pQyJhksRk4BEi9)
+02:29:37  MODEL OUTPUT  thinking     I'm checking the dates: an issue date of 2026-09-30 plus 15 days lands on 2026-10-15. The total of 302 also checks out, since 260 plus 42 equals 302.
+02:29:38  MODEL OUTPUT  structured   {'vendor_name': 'Hollis Pest Control', 'invoice_date': '2026-09-30', 'due_date': '2026-10-15', 'total_amount': 302, 'line_items': [..., {'description': 'Bait station replacement', 'quantity': 3, 'unit_price': 14}]}  (id=toolu_01ReD2imjpicHNtqcKHZD33R)
+02:29:39  pairs    M1 (mixed): vendor_name=correct ... line_items=correct
+```
+
+| Variable / field (code) | Value in the real run |
+|-------------------------|-----------------------|
+| `system_prompt` | `PAIRS_PROMPT` = `BASE_PROMPT` + 3 `<example>` blocks, no `<reasoning>` |
+| `message.subtype` / `stop_reason` | `success` / `tool_use` × 5 |
+| Score lines | all `correct`; N2 `due_date=probe:''` |
+| `vendor_name` values | `Ridgeway Shelving Co.`, `CloudNest Software`, `Summit Tentworks`, `Okafor Sign Works`, `Hollis Pest Control` |
+| Wall time | 02:29:08 → 02:29:39, about 31 s |
+
+Lessons from the real data:
+- **The examples changed the format, against the instruction.** All three all-caps vendors became title case, the way every example's `extraction` writes its vendor. The instruction says "as written"; the examples showed something else, and Claude followed the examples. The reasoning-free pairs were enough for this: it's a surface pattern.
+- **`CloudNest`, not `Cloudnest`.** Title-casing `CLOUDNEST` needed a guess about the inner capital. `TRUTH` says `Cloudnest Software`; the scorer's `_norm()` lowercases both, so it scored `correct`.
+- **Descriptions drifted too:** `Mounting hardware bag` → `Bag of mounting hardware`, `Replacement bait stations` → `Bait station replacement`. `score()` ignores descriptions, so no line shows it.
+- **Accuracy didn't move:** still 24/24, still `probe:''`, still total 455 for T2.
+
+### 5.3 Run 3: `few-shot` (examples with reasoning)
+
+```
+02:29:39  MODEL INPUT   system       You extract invoice data ... Worked examples:
+<example>
+...
+<reasoning>Each product row is a line item with its Qty and Unit price. The Total due row is the invoice total, not a line item. Both dates are already YYYY-MM-DD.</reasoning>
+<extraction>{"vendor_name": "Brightline Packaging", ...}</extraction>
+</example>
+...
+02:29:43  MODEL OUTPUT  structured   {'vendor_name': 'Ridgeway Shelving Co.', ...}  (id=toolu_01F5FeyLy1o4U9PZQ1sRwyyR)
+02:29:52  MODEL OUTPUT  structured   {'vendor_name': 'CloudNest Software', ..., 'total_amount': 455, ...}  (id=toolu_01A5CXBzxi95dogEBpeZcCfV)
+02:29:57  MODEL OUTPUT  thinking     I'm checking the arithmetic: 6 × 189 gives 1134, and 12 × 7.5 gives 90, so the total of 1224 holds up. Next I'm working out the due date, which is 30 days after September 3, landing on October 3.
+02:30:02  MODEL OUTPUT  thinking     I've checked the arithmetic and it holds at 674. The document doesn't state a due date, and the schema requires a string, but I'd rather not invent one, so I'm leaving that field as an empty string.
+02:30:02  MODEL OUTPUT  structured   {'vendor_name': 'Okafor Sign Works', 'invoice_date': '2026-09-18', 'due_date': '', 'total_amount': 674, ...}  (id=toolu_012C6mm9tgcCJ8fpmJR6wTkd)
+02:30:07  MODEL OUTPUT  thinking     I'm adding 15 days to 30 September 2026, which lands on 15 October 2026, and summing 260 and 42 to get 302.
+02:30:08  MODEL OUTPUT  structured   {'vendor_name': 'Hollis Pest Control', 'invoice_date': '2026-09-30', 'due_date': '2026-10-15', 'total_amount': 302, 'line_items': [..., {'description': 'Bait station replacement', 'quantity': 3, 'unit_price': 14}]}  (id=toolu_01YW9ijgy5gUzgZG7HqCuBVX)
+02:30:09  few-shot M1 (mixed): vendor_name=correct ... line_items=correct
+```
+
+| Variable / field (code) | Value in the real run |
+|-------------------------|-----------------------|
+| `system_prompt` | `FEWSHOT_PROMPT` = `BASE_PROMPT` + 3 `<example>` blocks with `<reasoning>` |
+| `message.subtype` / `stop_reason` | `success` / `tool_use` × 5 |
+| Score lines | all `correct`; N2 `due_date=probe:''` |
+| `structured_output` vs `pairs` | identical field for field: vendors, dates, totals, line-item pairs and descriptions all match the `pairs` arm |
+| Wall time | 02:29:39 → 02:30:09, about 30 s |
+
+Lessons from the real data:
+- **Reasoning and pairs tied.** The `few-shot` outputs equal the `pairs` outputs, descriptions included. The `reasoning vs pairs` line reads `1/1 + 4/4 + 1/1` for both. On 5 short documents that the base arm already got right, there was no gap for reasoning to close.
+- **The thinking echoes the examples' habits.** Every narrative and mixed thinking summary checks the arithmetic ("the total of 1224 holds up") and computes the due date, which is what each example's reasoning does. The base arm did the same on N1 without examples, so the log can't attribute this to the reasoning.
+- **The reasoning didn't make Claude question T2's total.** The examples' reasoning checks that the total matches the items, but every example's total does match. T2's didn't, and all three arms returned 455 without comment. A pattern the examples never show isn't learned from them.
+
+### 5.4 The report
+
+```
+02:30:09  failure table vendor_name  table 0/2, narrative 0/2, mixed 0/1
+...
+02:30:09  diagnosis: no base failures
+02:30:09  base     empty 0/24  ISO dates 9/9  accuracy 24/24  changed between runs: n/a (1 run)
+...
+02:30:09  matrix narrative extraction  base 9/9  few-shot 9/9  fixed by examples: already fine  -> few-shot examples
+02:30:09  matrix mixed formats         base 5/5  few-shot 5/5  fixed by examples: already fine  -> few-shot examples
+02:30:09  matrix format consistency    base 9/9  few-shot 9/9  fixed by examples: already fine  -> few-shot examples
+02:30:09  matrix missing data (N2 due) base probe:''  few-shot probe:''  fixed by examples: no  -> nullable schema fields (topic 03)
+02:30:09  matrix sum discrepancy (T2)  base items 445.00 vs total 455  few-shot items 445.00 vs total 455  fixed by examples: no  -> validation and retry loop (topic 04)
+02:30:09  matrix malformed JSON        base 0  few-shot 0 calls without structured output  -> tool use / output_format (topic 03)
+```
+
+| Report value (code) | Value | How to read it |
+|---------------------|-------|----------------|
+| `failing` (`main_report()`) | empty set | `diagnosis: no base failures`: nothing to prescribe |
+| `fixed` for the first 3 matrix rows | `already fine` | `b_ok == b_n`: the base arm was perfect, so the examples had nothing to fix |
+| N2 `due_date`, `base` / `few-shot` | `probe:''` / `probe:''` | not invented, but an empty string where the honest answer is `null` |
+| `sums` for T2 | `445.00`, `445.00` | the source disagrees with itself: items 445, stated total 455 |
+| calls without structured output | 0 / 0 | `output_format` made every reply valid JSON |
+
+### 5.5 The three arms side by side
+
+| | `base` | `pairs` | `few-shot` |
+|-|--------|---------|------------|
+| System prompt | `BASE_PROMPT` | `+ 3 examples` | `+ 3 examples with <reasoning>` |
+| `query()` calls | 5 | 5 | 5 |
+| `StructuredOutput` calls | 5 | 5 | 5 |
+| Final `subtype` / `stop_reason` | `success` / `tool_use` × 5 | same | same |
+| `thinking` lines | N1, N2 | N1, N2, M1 | N1, N2, M1 |
+| `text` lines | 1 (M1) | 0 | 0 |
+| Empty / ISO / accuracy | 0/24, 9/9, 24/24 | 0/24, 9/9, 24/24 | 0/24, 9/9, 24/24 |
+| Vendor casing | as printed (`RIDGEWAY SHELVING CO.`) | title case (`Ridgeway Shelving Co.`) | title case |
+| N2 `due_date` | `''` | `''` | `''` |
+| T2 `total_amount` | 455 | 455 | 455 |
+| `ResultError` / `ClaudeSDKError` | no | no | no |
+| Wall time (from log) | about 26 s | about 31 s | about 30 s |
+
+The whole run took 87 s (02:28:42 → 02:30:09). The log has no `no structured output`, `The extraction failed:` or `SDK error:` line, so the script exited with `0`.
+
+**The correction the log makes:** the curriculum and the README expect the base arm to fail on narrative and mixed documents and the examples to fix it. In this run the base arm didn't fail, the matrix's first three rows say `already fine`, and the only measurable effect of the examples was a format change the scorer forgives (vendor casing, descriptions). The three "examples can't fix it" rows behaved as expected: no arm produced a `null`, no arm flagged T2, and no arm needed a JSON fix.
+
+---
+
+## 6. Agentic AI concepts recap
+
+| Concept | How this POC shows it |
+|---------|-----------------------|
+| **Baseline before intervention** | The `base` arm runs first with detailed instructions and no examples; every other arm is compared with it. |
+| **Diagnose before prescribing** | `failure table` per field and structure, then `diagnosis:` maps each failing structure to its example (`TARGETS`). |
+| **Few-shot examples** | Three worked invoices in the system prompt, one per structure, not taken from the test set. |
+| **Examples with reasoning** | `<reasoning>` states how each value was found and which rule applied; `pairs` leaves it out to isolate its effect. |
+| **Examples steer format** | The real run: the examples' title-cased vendors overrode "as written" in both example arms. |
+| **Controlled comparison** | Same model, schema, documents, options and user prompt; `PAIRS_PROMPT` and `FEWSHOT_PROMPT` start with `BASE_PROMPT`. |
+| **Session isolation** | One `query()` per document: earlier extractions can't act as examples. |
+| **Structured output** | `output_format` → `StructuredOutput` → `structured_output`; final `stop_reason` is `tool_use`. |
+| **Measured evaluation** | Per-field verdicts against `TRUTH`; empty rate, ISO rate, accuracy, per structure. |
+| **Technique-to-problem matching** | The decision matrix: examples for consistency, nullable schema for missing data, validation loop for sum errors, tool use for JSON. |
+| **Schema forces behaviour** | Required, non-nullable `due_date` → `''` for N2 in every arm. |
+| **Observability** | One log line per model input or output plus the score and report lines; adaptive thinking shows the model's checks. |
+
+---
+
+## 7. Common mistakes this POC helps you avoid
+
+1. **Adding more instructions to fix inconsistency.** The arms keep the instructions identical and change only the examples, because examples are the first-choice fix.
+2. **Prescribing before diagnosing.** Writing examples without knowing which fields fail on which structure. The failure table comes first; in this run it said there was nothing to fix.
+3. **Assuming the baseline fails.** A strong model on clean documents may already be right. Measure first; don't pay for examples you don't need.
+4. **Using test documents as examples.** The examples are different invoices, so a correct answer must come from the rule, not a copy.
+5. **Bare input/output pairs when the decision needs a rule.** Pairs teach surfaces (the run shows it: title case was copied without any reasoning).
+6. **Letting examples contradict the instructions.** "As written" in the prompt, title case in the examples: the examples won. Make every example obey every instruction.
+7. **Expecting examples to stop fabrication.** If the schema has no `null`, Claude must invent a value or return a fake blank. Change the schema.
+8. **Expecting examples to fix a source error.** T2's total was wrong in the document; every arm copied it. That needs a validation check and retry.
+9. **Blaming the examples for malformed JSON.** Hold the output channel constant with `output_format` (or a forced tool).
+10. **Checking `stop_reason == "end_turn"` for structured output.** All 15 successful calls ended with `tool_use`.
+11. **A scorer that hides the change you care about.** Case-insensitive vendor matching scored the casing change as `correct`. Keep raw values and compare them.
+12. **One run per arm for "format drift".** Without temperature or seed in the SDK, drift between runs needs repeated runs (the optional `ARMS` entries).
+
+---
+
+## 8. Claude Architect exam lens
+
+### 8.1 What the exam tests on this topic
+
+The objectives come from `curriculum/04-Prompt-Engineering-Structured-Output/02-raw-Few-Shot-Prompting.md`. This POC covers all five.
+
+| Exam objective | What a correct answer looks like | Where this POC shows it |
+|----------------|----------------------------------|-------------------------|
+| 1. Base prompt with detailed instructions, no examples, against 5 varied documents | Instructions alone are inconsistent across structures (right from tables, empty or wrong from narrative, formats that drift between runs). That inconsistency is the trigger for few-shot. | `BASE_PROMPT`, `DOCUMENTS`, the `base` arm. Real run: 24/24, so no trigger fired |
+| 2. Record which fields fail on which document type | Diagnose before prescribing: a table of field × structure tells you what the examples must demonstrate. | `failure table` lines, `diagnosis:` line, `TARGETS` |
+| 3. 3 examples targeting the failing patterns, each with reasoning | One example per structure, each showing where the data was and why each decision was made. Reasoning generalizes; bare pairs teach surface matching. | `EXAMPLES`, `examples_block(True)`; the `pairs` arm as the control |
+| 4. Re-run and compare empty rate, format consistency, accuracy | Few-shot is the first-choice technique for consistency problems and beats more instructions. The biggest gain is on the structures that failed. | comparison and `by structure` lines; `Same instructions in every arm` |
+| 5. Decision matrix: what examples fix and what they don't | Examples: consistency and structural variety. Malformed JSON → tool use. Fabricated values → nullable schema. Sum discrepancies → validation loops. | the 6 `matrix` lines |
+
+> **Exam tip:** the exam usually describes few-shot examples in the raw Messages API, where they sit in the `system` string or as earlier `user`/`assistant` turns, and structured output as a forced tool (`tool_choice`). The POC uses the Agent SDK's `system_prompt` and `output_format`. The rules are the same: examples in the prompt, JSON through a tool, and a schema that decides what Claude is allowed to say.
+
+### 8.2 The same experiment with the raw Messages API
+
+With the raw API, one extraction is one `messages.create()` call. Structured output is a forced tool call, the technique the matrix's `malformed JSON` row names (topic 03).
+
+```python
+import anthropic
+
+client = anthropic.Anthropic()
+# MODEL_ID, DOCUMENTS, EXTRACTION_SCHEMA, BASE_PROMPT, PAIRS_PROMPT and FEWSHOT_PROMPT are as in the POC.
+
+RECORD_INVOICE = {
+    "name": "record_invoice",
+    "description": "Record the fields extracted from one invoice.",
+    "input_schema": EXTRACTION_SCHEMA,
+}
+
+
+def extract(system_prompt: str, doc_id: str) -> dict | None:
+    response = client.messages.create(
+        model=MODEL_ID,
+        max_tokens=4096,
+        system=system_prompt,  # BASE_PROMPT, PAIRS_PROMPT or FEWSHOT_PROMPT: the examples live here
+        messages=[{"role": "user",  # a new list per call: no other document's extraction in the context
+                   "content": f"Extract the invoice below.\n\n<document>\n{DOCUMENTS[doc_id]}\n</document>"}],
+        tools=[RECORD_INVOICE],
+        tool_choice={"type": "tool", "name": "record_invoice"},  # forced: the reply is always this tool call
+    )
+    for block in response.content:  # stop_reason is "tool_use", as in the POC
+        if block.type == "tool_use":
+            return block.input  # the JSON, already shaped by input_schema
+    return None
+
+
+scores = {label: {d: score(d, extract(prompt, d)) for d in DOCUMENTS}
+          for label, prompt in (("base", BASE_PROMPT), ("pairs", PAIRS_PROMPT), ("few-shot", FEWSHOT_PROMPT))}
+```
+
+| Raw Messages API (you write it) | Agent SDK (`poc1_few_shot.py` + `fewshot_setup.py`) |
+|---------------------------------|-----------------------------------------------------|
+| `system=FEWSHOT_PROMPT` | `system_prompt=system_prompt` in `build_extract_options()` |
+| Examples could also go in as earlier `user`/`assistant` turns in `messages` | Examples are only in the system prompt; each `query()` starts a new session |
+| A new `messages` list per call | A new session per `query()` call |
+| Your own tool + `tool_choice={"type": "tool", ...}` | `output_format={"type": "json_schema", ...}` → built-in `StructuredOutput` tool |
+| `block.input` of the `tool_use` block | `ResultMessage.structured_output` |
+| `stop_reason == "tool_use"` | Final `stop_reason == "tool_use"`, `subtype == "success"` |
+| You validate the input yourself, or retry | The SDK validates against the schema; failure → `error_max_structured_output_retries` + `ResultError` |
+| `temperature` is available | No `temperature` or `seed` in `ClaudeAgentOptions`: repeat runs to see drift |
+| One call, nothing to cap | `max_turns` and `max_budget_usd` per call |
+| `thinking=...` parameter (not combined with a forced tool) | `thinking={"type": "adaptive", "display": "summarized"}` |
+
+Two things the raw version makes obvious:
+- **The examples are just text in the request.** Nothing in the API "knows" they are examples; their effect comes from what they show, which is why an example that contradicts an instruction (the vendor casing) wins.
+- **The schema decides what can be said.** `input_schema` with a required `due_date` string gives Claude no way to answer "none", in either API.
+
+### 8.3 Scenario questions
+
+Try each one before reading the answer. These questions were written for this article to match the curriculum objectives above. They are not official exam questions.
+
+---
+
+**Scenario 1: Right from tables, wrong from letters**
+
+An invoice extractor with detailed field instructions gets every field right on tabular invoices, but on invoices written as letters it leaves `line_items` empty and returns due dates as text such as "30 days". What should you try first?
+
+- A. Add more detailed instructions about letters to the system prompt.
+- B. Add 2–3 few-shot examples, including a letter-style invoice, each with reasoning that shows where the values were found and how the due date was computed.
+- C. Switch to a larger model.
+- D. Split the extractor into one prompt per document type.
+
+**Answer: B.** Inconsistent output across document structures, with good instructions already in place, is the trigger for few-shot examples: they show the expected output and the decisions behind it. A adds more of what already failed. C and D are heavier changes that skip the first-choice fix. *POC link:* `EXAMPLES` holds one narrative example whose reasoning covers numbers in words, a free item and a relative due date; the `pairs` and `few-shot` arms add it without changing `BASE_PROMPT`.
+
+---
+
+**Scenario 2: Where to start**
+
+A team says their extraction is "inconsistent" and wants to write examples today. They have no breakdown of which fields fail where. What should they do first?
+
+- A. Write examples for all fields on all document types.
+- B. Run the current prompt over a varied test set with known values and record which fields are empty or wrong on which document structure.
+- C. Raise `max_tokens`.
+- D. Ask the model to rate its own consistency.
+
+**Answer: B.** Diagnose before prescribing: the failure pattern tells you what the examples must demonstrate. Without it, examples may target problems you don't have. *POC link:* the 5 `failure table` lines and the `diagnosis:` line in `main_report()`. In the real run the diagnosis was `no base failures`, so writing examples would have fixed nothing.
+
+---
+
+**Scenario 3: Pairs or reasoning?**
+
+Two prompt variants use the same 3 examples. Variant X shows each document and its JSON. Variant Y adds, for each example, a short explanation of where each value came from and why (e.g. "the carry bags are complimentary, so they are not a line item"). On new documents with patterns no example shows exactly, which should generalize better, and why?
+
+- A. X, because shorter prompts are always better.
+- B. Y, because the reasoning teaches the rule behind each decision, while bare pairs teach surface pattern matching.
+- C. Both are the same, because the JSON is identical.
+- D. Neither; only fine-tuning generalizes.
+
+**Answer: B.** This is the curriculum's point: reasoning-included examples outperform input/output pairs on novel patterns. *POC link:* the `pairs` vs `few-shot` arms and the `reasoning vs pairs ...` line. In the real run they tied (`1/1 + 4/4 + 1/1` each), because the base arm already got everything right; the gap shows only where there is something to learn.
+
+---
+
+**Scenario 4: The example that overrode the instruction**
+
+The system prompt says "vendor_name: the company name, as written". After adding three examples, all-caps vendors like `ACME SUPPLY` now come back as `Acme Supply`. What happened?
+
+- A. The model ignores system prompts once examples are present.
+- B. The examples' extractions write the vendor in title case, and Claude followed the examples' format over the instruction.
+- C. `output_format` changes string casing.
+- D. The JSON schema lowercases strings.
+
+**Answer: B.** Examples are strong format signals. When an example contradicts an instruction, the output tends to follow the example. Fix the examples so they obey every instruction (or change the instruction). *POC link:* the real run: base returned `RIDGEWAY SHELVING CO.` and `HOLLIS PEST CONTROL`, while `pairs` and `few-shot` returned `Ridgeway Shelving Co.` and `Hollis Pest Control`, matching `"Brightline Packaging"` and `"Cascade Filters Ltd"` in `EXAMPLES`.
+
+---
+
+**Scenario 5: The invented due date**
+
+An invoice has no due date. The schema marks `due_date` as a required string. After adding few-shot examples, the extractor still returns either an empty string or a plausible date like "2026-10-18". What is the right fix?
+
+- A. Add an example of an invoice with no due date.
+- B. Make `due_date` nullable (`["string", "null"]`) and tell the model to return `null` when the document has no value.
+- C. Add "never invent data" in capitals to the prompt.
+- D. Lower the temperature.
+
+**Answer: B.** Fabrication of missing data is a schema problem: a required, non-nullable field leaves no honest answer. Examples don't add a `null` the schema forbids. A could show an empty string, but that's still not `null`. *POC link:* `EXTRACTION_SCHEMA` (no `"null"` type) and the matrix line `missing data (N2 due) base probe:''  few-shot probe:''  fixed by examples: no  -> nullable schema fields (topic 03)`. Claude's thinking said "I'd rather not invent one", and the only option left was `''`.
+
+---
+
+**Scenario 6: The total that doesn't add up**
+
+A supplier's invoice lists items summing to 445.00 and states a total of 455.00. Every prompt variant, with or without examples, returns 455.00. What's the right technique?
+
+- A. More few-shot examples with correct totals.
+- B. Extract the stated total and the items, then check in code that they match; on a mismatch, retry with the specific error or flag it for review.
+- C. Tell the model to always compute the total itself.
+- D. Use a bigger model.
+
+**Answer: B.** A sum discrepancy is in the source document. Examples can't fix it, and silently "correcting" it (C) hides a real billing error. A validation check with a retry or flag catches it. *POC link:* the matrix line `sum discrepancy (T2)  base items 445.00 vs total 455 ... -> validation and retry loop (topic 04)`.
+
+---
+
+**Scenario 7: Malformed JSON**
+
+An extractor that returns JSON as free text breaks about 1 call in 50 with a trailing comma. A colleague suggests adding more examples of valid JSON. What do you recommend?
+
+- A. More examples of valid JSON.
+- B. Return the JSON through a tool: a forced tool call with an `input_schema` (or the Agent SDK's `output_format`), so the output is always schema-shaped.
+- C. Parse with a lenient JSON parser and ignore the errors.
+- D. Lower `max_tokens`.
+
+**Answer: B.** Malformed JSON is an output-channel problem; tool use fixes it structurally. Examples improve consistency but can't guarantee syntax. *POC link:* `output_format` in `build_extract_options()`; the matrix line `malformed JSON  base 0  few-shot 0 calls without structured output`.
+
+---
+
+**Scenario 8: Proving the examples helped**
+
+After adding few-shot examples, a team says extraction "looks better". Which measurement shows whether the examples worked?
+
+- A. Count the tokens in each response.
+- B. Re-run the same documents with the same model, schema and instructions, and compare empty-field rate, format consistency and per-field accuracy against known values, per document structure.
+- C. Ask users which output they prefer.
+- D. Check that every call ends with `stop_reason == "end_turn"`.
+
+**Answer: B.** A fair comparison changes only the examples and measures the three things the curriculum names, by structure, so you can see the gain where the baseline failed. D is wrong twice: completion isn't quality, and with structured output the final `stop_reason` is `tool_use`. *POC link:* the `<arm> empty ... ISO dates ... accuracy ...` and `<arm> by structure:` lines; `PAIRS_PROMPT` and `FEWSHOT_PROMPT` both start with `BASE_PROMPT`.
+
+---
+
+**Scenario 9: Examples copied from the test set**
+
+To get a quick win, an engineer writes few-shot examples from three of the five test invoices. Accuracy jumps to 100%. What's wrong with this?
+
+- A. Nothing; 100% is the goal.
+- B. The test now measures copying, not generalization: the model can reproduce the example answers. Examples must come from documents outside the test set.
+- C. Examples must always be longer than the test documents.
+- D. Few-shot examples only work on tables.
+
+**Answer: B.** Examples taken from the test set leak the answers. The POC uses three different invoices (Brightline, Juniper, Cascade) so that a correct test answer must come from the rule. *POC link:* `EXAMPLES` comment: "3 invoices that are NOT in the test set".
+
+---
+
+**Scenario 10: The baseline is already perfect**
+
+A team runs the full experiment and the baseline (detailed instructions, no examples) scores 100% on every field. The few-shot arm also scores 100%. What should they conclude?
+
+- A. Few-shot prompting doesn't work.
+- B. On these documents the instructions are enough; there's no consistency problem for examples to fix. Test harder or more varied documents (and repeat runs for drift) before adding examples, and keep the problems examples can't fix on the list.
+- C. Remove the instructions and keep only the examples.
+- D. Always add examples anyway; they never hurt.
+
+**Answer: B.** Few-shot is the first-choice fix for a consistency problem, not a ritual. Without a measured failure there's nothing to prescribe. D is wrong because examples do change behaviour, sometimes against the instructions. *POC link:* the real run: `diagnosis: no base failures`, `fixed by examples: already fine` on the first three matrix rows, and the vendor-casing change in both example arms.
+
+---
+
+### 8.4 Quick-recall cheat sheet
+
+```
+trigger for few-shot     → good instructions, still inconsistent across document structures
+diagnose first           → field × structure failure table; each failing structure → one targeted example
+examples                 → 2-4, one per structure, NOT from the test set, wrapped in <example> tags
+with reasoning           → where each value was found + the rule applied → generalizes to new patterns
+bare input/output pairs  → surface pattern matching (they still copy format: title-cased vendors)
+examples vs instructions → examples win; make every example obey every instruction
+measure                  → empty rate, format consistency (ISO dates), per-field accuracy, by structure
+fair comparison          → same model, schema, documents, instructions; only the examples change
+examples DON'T fix       → malformed JSON → tool use / output_format
+                           missing data invented / faked → nullable schema fields
+                           sum discrepancies in the source → validation + retry loop
+SDK structured output    → output_format → StructuredOutput tool → structured_output; stop_reason "tool_use"
+SDK has no temperature   → repeat runs to see format drift
+```
+
+---
+
+## 9. How to run it
+
+```bash
+cd 04-Prompt-Engineering-Structured-Output/02-Few-Shot-Prompting
+python3 -m venv .venv && source .venv/bin/activate   # Python 3.10+
+pip install -r requirements.txt                      # claude-agent-sdk >=0.2.174,<0.3 and python-dotenv
+cp .env.example .env                                 # then put your API key in .env
+python poc1_few_shot.py                              # paid: 3 arms × 5 documents = 15 query() calls
+```
+
+- The script calls the API. This folder has no free offline demo.
+- `.env` needs `ANTHROPIC_API_KEY`. `MODEL_ID`, `MAX_TURNS` and `MAX_BUDGET_USD` fall back to `claude-sonnet-5-5`, `5` and `0.50`.
+- To measure format drift between runs, uncomment the three optional entries in `ARMS`: 30 calls, and the `changed between runs` column gets a number.
+- Every model input and output, the score lines and the report are printed to the console and written to `logs/poc1_few_shot_<date>_<time>.log`. Expect different wording in thinking and descriptions on each run; with a strong model the scores may again be 24/24.
+- The exit code is `0` when all arms finish (failed extractions are logged and skipped, not fatal). It's `1` on a setup failure (`OSError`, `RuntimeError`) or an SDK runtime failure (`ClaudeSDKError`).
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>
+(function () {
+  const art = document.getElementById('article');
+  art.innerHTML = marked.parse(document.getElementById('src').textContent, { gfm: true });
+
+  // Hero: move h1 + metadata blockquote
+  const heroText = document.getElementById('hero-text');
+  const h1 = art.querySelector('h1');
+  if (h1) {
+    const t = h1.innerHTML; const i = t.indexOf(': ');
+    h1.innerHTML = i > -1 ? '<span class="eyebrow">' + t.slice(0, i + 1) + '</span><span class="rest">' + t.slice(i + 2) + '</span>' : t;
+    heroText.appendChild(h1);
+    const bq = art.firstElementChild;
+    if (bq && bq.tagName === 'BLOCKQUOTE') {
+      const ul = document.createElement('ul'); ul.className = 'meta';
+      bq.querySelector('p').innerHTML.split('\n').forEach(function (line) {
+        if (!line.trim()) return; const li = document.createElement('li'); li.innerHTML = line; ul.appendChild(li);
+      });
+      heroText.appendChild(ul); bq.remove();
+    }
+  }
+
+  // Headings: number badges, ids, TOC
+  const toc = document.getElementById('toc');
+  const used = {};
+  art.querySelectorAll('h2, h3, h4').forEach(function (h) {
+    const text = h.textContent;
+    let id = text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    if (used[id]) id += '-' + (++used[id]); else used[id] = 1;
+    h.id = id;
+    const m = h.innerHTML.match(/^(\d+(?:\.\d+)*\.?)\s/);
+    if (m) h.innerHTML = '<span class="num">' + m[1] + '</span>' + h.innerHTML.slice(m[0].length);
+    if (h.tagName === 'H4') return;
+    const li = document.createElement('li'); const a = document.createElement('a');
+    a.href = '#' + id; a.textContent = text; if (h.tagName === 'H3') a.className = 'sub';
+    li.appendChild(a); toc.appendChild(li);
+  });
+
+  // Tables
+  art.querySelectorAll('table').forEach(function (t) {
+    const w = document.createElement('div'); w.className = 'table-wrap'; t.before(w); w.appendChild(t);
+  });
+
+  // Code blocks
+  art.querySelectorAll('pre').forEach(function (pre) {
+    const code = pre.querySelector('code');
+    const lm = code && (code.className.match(/language-(\w+)/) || [])[1];
+    const box = document.createElement('div'); box.className = 'code';
+    const bar = document.createElement('div'); bar.className = 'code-bar';
+    bar.innerHTML = '<i></i><i></i><i></i><span class="lang ' + (lm || 'text') + '">' + (lm || 'text') + '</span><span class="spacer"></span>';
+    const btn = document.createElement('button'); btn.type = 'button'; btn.textContent = 'Copy';
+    btn.addEventListener('click', function () {
+      const done = function () { btn.textContent = 'Copied'; setTimeout(function () { btn.textContent = 'Copy'; }, 1400); };
+      const fallback = function () { const r = document.createRange(); r.selectNodeContents(code); const s = getSelection(); s.removeAllRanges(); s.addRange(r); btn.textContent = 'Selected'; };
+      try { navigator.clipboard.writeText(code.textContent).then(done, fallback); } catch (e) { fallback(); }
+    });
+    bar.appendChild(btn);
+    pre.before(box); box.appendChild(bar); box.appendChild(pre);
+    if (lm && window.hljs && hljs.getLanguage(lm)) hljs.highlightElement(code);
+  });
+
+  // Scenario cards
+  const isHead = function (el) {
+    return el.tagName === 'P' && el.children.length === 1 && el.firstElementChild.tagName === 'STRONG' &&
+      el.textContent.trim() === el.firstElementChild.textContent.trim() && /^Scenario \d+/.test(el.textContent.trim());
+  };
+  let el = art.firstElementChild;
+  while (el) {
+    if (isHead(el)) {
+      const card = document.createElement('section'); card.className = 'scenario';
+      el.before(card); el.classList.add('scenario-head');
+      const s = el.firstElementChild;
+      s.innerHTML = s.innerHTML.replace(/^(Scenario \d+:)\s*/, '<span class="pill">$1</span> ');
+      let n = el;
+      while (n && !(n.tagName === 'HR' || /^H[1-6]$/.test(n.tagName) || n.classList.contains('scenario'))) {
+        const next = n.nextElementSibling; card.appendChild(n); n = next;
+      }
+      el = n; continue;
+    }
+    el = el.nextElementSibling;
+  }
+  art.querySelectorAll('hr').forEach(function (hr) {
+    const p = hr.previousElementSibling, n = hr.nextElementSibling;
+    if ((p && p.classList.contains('scenario')) || (n && n.classList.contains('scenario'))) hr.remove();
+  });
+  art.querySelectorAll('.scenario').forEach(function (card) {
+    const ansP = Array.from(card.querySelectorAll(':scope > p')).find(function (p) { return /^Answer:/.test(p.textContent.trim()); });
+    if (!ansP) return;
+    const correct = (ansP.textContent.match(/Answer:\s*([A-D])/) || [])[1];
+    const det = document.createElement('details'); det.className = 'answer';
+    det.innerHTML = '<summary>Reveal answer</summary>';
+    ansP.before(det); det.appendChild(ansP);
+    const ul = Array.from(card.querySelectorAll(':scope > ul')).find(function (u) { return /^[A-D]\.\s/.test(u.textContent.trim()); });
+    if (!ul) return;
+    ul.className = 'options';
+    const items = Array.from(ul.children);
+    items.forEach(function (li) {
+      li.innerHTML = li.innerHTML.replace(/^([A-D]\.)\s/, '<span class="opt-key">$1</span><span>') + '</span>';
+      li.dataset.key = li.textContent.trim().charAt(0);
+      li.tabIndex = 0; li.setAttribute('role', 'button');
+      const pick = function () {
+        items.forEach(function (o) { o.classList.remove('wrong', 'correct'); });
+        if (li.dataset.key !== correct) li.classList.add('wrong');
+        items.forEach(function (o) { if (o.dataset.key === correct) o.classList.add('correct'); });
+        det.open = true;
+      };
+      li.addEventListener('click', pick);
+      li.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } });
+    });
+    det.addEventListener('toggle', function () {
+      if (det.open) items.forEach(function (o) { if (o.dataset.key === correct) o.classList.add('correct'); });
+    });
+  });
+
+  // Inline code pills, colour-coded by meaning
+  const kinds = [
+    ['k-bad', /error_|ResultError|ClaudeSDKError|^None$|RuntimeError|ValueError|OSError|is_error|max_tokens|eval\(\)|async_launched|BLOCKED|Handoff rejected|\['fusion'\]|^missing$|^partial$|complete: False|^empty$|^wrong$|^probe:|no structured output/],
+    ['k-ok', /end_turn|"success"|^success$|well_covered|complete: True|^correct$|already fine/],
+    ['k-cap', /max_turns|max_budget_usd|MAX_TURNS|MAX_BUDGET_USD|MAX_ITERATIONS|max_iterations|COVERAGE_THRESHOLD|readOnlyHint|tools=\[|allowed_tools|setting_sources|ENABLE_TOOL_SEARCH|maxTurns|output_format|output_config|DISABLE_|MODEL_ID|with_agents|inherit|mcp_servers|agents=|^thinking$|agent_tool|approve_agent|SEQUENTIAL_RULE|PARALLEL_RULE|VERIFY_RULE|HANDOFF_RULE|^gate$|verify_rule|^handoff$|HANDOFF_FIELDS|PostToolUse|PreToolUse|HookMatcher|^hooks=|NORMALIZE_HOOKS|_SCHEMA$|FILE_REVIEW|CROSS_FILE_ISSUES/],
+    ['k-tool', /tool_use|tool_result|ToolUseBlock|ToolResultBlock|mcp__|calculator|web_search|@tool|_search_backend|_evaluate|^"?Agent"?$|^Task$|StructuredOutput|read_document|subagent_type|^web-searcher$|^doc-analyst$|^synthesizer$|list_documents|process_refund|get_customer|lookup_order|escalate_to_human/],
+    ['k-msg', /Message\b|TextBlock|ThinkingBlock|stop_reason|subtype|message\.result|\.result\b|structured_output|^\[(coordinator|web-searcher|doc-analyst|synthesizer)\]$|hand-back|agentId|<usage>|init_tools|message_id|system:init|hookSpecificOutput|updatedToolOutput|permissionDecision|tool_response|tool_input|^<(example|document|reasoning|extraction)>$/],
+    ['k-fn', /query|ClaudeAgentOptions|build_options|run_agent|load_settings|asyncio|main\(\)|Settings|run_coordinator|research_once|decompose|delegate|build_coordinator_options|missing_categories|log_model_io|setup_logging|text_of|run_subagent|agent_loop|AgentDefinition|create_sdk_mcp_server|COORDINATOR_PROMPT|^AGENTS$|assess_coverage|coverage_percent|merge_sections|^research(\(\))?$|build_pipeline_options|parse_findings|parse_json_object|delegation_timing|coordinator_prompt|strip_metadata|check_metadata_passed|verify_attribution|diagnose|run_support|build_support_options|build_support_server|validate_handoff|SupportSession|verified_ids|normalize_output|normalize_record|to_iso|to_status|same_shape|parse_summary|response_text|build_hook_options|HookState|refund_limit|aml_gate|record_aml|load_repo|format_file|run_review|log_scores|flagged|build_review_options|multi_pass|REVIEWER_PROMPT|INTEGRATION_PROMPT|FILE_PROMPT|^extract(\(\))?$|^score(\(\))?$|run_arm|main_report|^cells(\(\))?$|^correct\(\)$|iso_dates|^accuracy(\(\))?$|examples_block|build_extract_options|_PROMPT$|^EXAMPLES$|^ARMS$|^TRUTH$|^DOCUMENTS$|DOC_TYPES|^_norm/]
+  ];
+  art.querySelectorAll(':not(pre) > code').forEach(function (c) {
+    const t = c.textContent;
+    for (let i = 0; i < kinds.length; i++) { if (kinds[i][1].test(t)) { c.classList.add(kinds[i][0]); break; } }
+  });
+
+  // Wrap each h2 and what follows into a coloured section
+  const hues = ['--c1', '--c2', '--c3', '--c4', '--c5', '--c6'];
+  let secIdx = 0, cur = null, node = art.firstElementChild;
+  while (node) {
+    const next = node.nextElementSibling;
+    if (node.tagName === 'HR' && next && next.tagName === 'H2') { node.remove(); node = next; continue; }
+    if (node.tagName === 'H2') {
+      cur = document.createElement('section'); cur.className = 'sec';
+      cur.style.setProperty('--sec', 'var(' + hues[secIdx++ % hues.length] + ')');
+      node.before(cur);
+    }
+    if (cur) cur.appendChild(node);
+    node = next;
+  }
+  toc.querySelectorAll('a').forEach(function (a) {
+    const h = document.getElementById(a.getAttribute('href').slice(1));
+    const sec = h && h.closest('.sec');
+    if (sec) a.style.setProperty('--sec', sec.style.getPropertyValue('--sec'));
+    a.insertAdjacentHTML('afterbegin', '<span class="dot"></span>');
+  });
+
+  // Collapse TOC on narrow screens
+  if (window.matchMedia('(max-width: 1000px)').matches) document.getElementById('toc-details').open = false;
+
+  // Progress + active TOC link
+  const bar = document.getElementById('bar');
+  const links = Array.from(toc.querySelectorAll('a'));
+  const heads = links.map(function (a) { return document.getElementById(a.getAttribute('href').slice(1)); });
+  let ticking = false;
+  const update = function () {
+    const max = document.documentElement.scrollHeight - innerHeight;
+    bar.style.width = (max > 0 ? (scrollY / max) * 100 : 0) + '%';
+    let cur = 0;
+    heads.forEach(function (h, i) { if (h.getBoundingClientRect().top < 120) cur = i; });
+    links.forEach(function (a, i) { a.classList.toggle('active', i === cur); });
+    ticking = false;
+  };
+  addEventListener('scroll', function () { if (!ticking) { ticking = true; requestAnimationFrame(update); } }, { passive: true });
+  update();
+})();
+</script>
+
+</body></html>

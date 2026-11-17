@@ -1044,20 +1044,73 @@ Each trace below is the real run from `logs/poc2_refinement_20261027_183353.log`
 **Real log (condensed):**
 
 ```
-18:35:22  MODEL INPUT   prompt       [coordinator] Research goal: ... ["solar power", "wind power"] ...
-18:35:26  MODEL OUTPUT  tool_use     [coordinator] Agent {... 'subagent_type': 'web-searcher', ...}  (id=toolu_01Tu2vqjMreBJPBviASoL2st)
-18:35:27  ... 2 × web_search [web-searcher]: 'solar power' → HX-SOL-7, 'wind power' → HX-WND-2 ...
-18:35:33  MODEL OUTPUT  tool_use     [coordinator] Agent {... 'subagent_type': 'doc-analyst', 'prompt': '... HX-SOL-7 (...) and HX-WND-2 (...) ...'}
-                                     (id=toolu_01GcAnEYKWj4EwLZBoCASCKw)
-18:35:35  ... 2 × read_document [doc-analyst]: HX-SOL-7, HX-WND-2 ...
-18:35:41  MODEL OUTPUT  structured   [coordinator] {'sections': [{'subtopic': 'solar power', ...}, {'subtopic': 'wind power', ...}]}
-18:35:42  MODEL INPUT   prompt       [coordinator] Topic: ... Report sections so far: [ ...2 sections... ] ...
-18:35:47  MODEL OUTPUT  structured   [coordinator] {'coverage': [solar: well_covered, wind: well_covered, geothermal: missing, tidal: missing,
-                                     biomass: missing, fusion: missing, hydropower: missing, green hydrogen: missing]}
-18:35:48  iteration 1: delegated 2 -> coverage 25% -> gaps ['geothermal', 'tidal', 'biomass', 'fusion', 'hydropower', 'green hydrogen']
-18:35:48  Coverage 25% after 1 iteration(s); gaps: ['geothermal', 'tidal', 'biomass', 'fusion', 'hydropower', 'green hydrogen']
-18:35:48  Never delegated in round 1: ['geothermal', 'tidal', 'biomass', 'fusion'] -> root cause: the coordinator's decomposition, not the subagents
-18:35:48  Run 'capped': dispatcher 25% -> coordinator 25% after 1 round(s), categories still missing: ['geothermal', 'tidal', 'biomass', 'fusion']
+18:35:22  MODEL INPUT   prompt       [coordinator]
+          Research goal: ...
+          Subtopics for this round (delegate only these, using these exact names): ["solar
+            power", "wind power"]
+          Delegate with one Agent call ...
+
+18:35:26  MODEL OUTPUT  tool_use     [coordinator]
+          Agent {'description': 'Find Helios sources', 'subagent_type': 'web-searcher',
+                 'prompt': 'Research goal: ... Find Helios Institute sources for exactly
+                     these subtopics: "solar power", "wind power". ...'}
+          (id=toolu_01Tu2vqjMreBJPBviASoL2st)
+
+18:35:27  ... 2 × web_search [web-searcher] and their tool_results, all is_error=None:
+              'solar power' → HX-SOL-7
+              'wind power'  → HX-WND-2
+
+18:35:33  MODEL OUTPUT  tool_use     [coordinator]
+          Agent {'description': 'Read Helios documents', 'subagent_type': 'doc-analyst',
+                 'prompt': 'Research goal: a sourced overview of "renewable energy
+                     technologies" with key figures from Helios Institute sources. Read
+                     these Helios documents by exact id and extract their key figures:
+                     HX-SOL-7 (subtopic "solar power"; search snippet: solar capacity grew
+                     31% in 2025, Helios Review 2026) and HX-WND-2 (subtopic "wind power";
+                     search snippet: offshore wind added 19.6 GW in 2025, Helios Review
+                     2026). Report key figures per subtopic.'}
+          (id=toolu_01GcAnEYKWj4EwLZBoCASCKw)
+
+18:35:35  ... 2 × read_document [doc-analyst] and their tool_results, all is_error=None:
+              'HX-SOL-7' → utility-scale cost fell to $27.40/MWh.
+              'HX-WND-2' → the average capacity factor reached 41.3%.
+
+18:35:41  MODEL OUTPUT  structured   [coordinator]
+          {'sections': [
+              {'subtopic': 'solar power', ...,
+               'sources': ['HX-SOL-7', 'Helios Review 2026 (search snippet)']},
+              {'subtopic': 'wind power', ...,
+               'sources': ['HX-WND-2', 'Helios Review 2026 (search snippet)']}
+          ]}
+          (id=toolu_01XZd3AKWin9ggUbDFHN4pne)
+
+18:35:42  MODEL INPUT   prompt       [coordinator]
+          Topic: renewable energy technologies. Must cover at least: ['solar', 'wind',
+            'geothermal', 'tidal', 'biomass', 'fusion']. Report sections so far: [ ...2
+            sections: solar power, wind power... ]. List every category this topic needs
+            ... Give a one-line reason for each.
+
+18:35:47  MODEL OUTPUT  structured   [coordinator]
+          {'coverage': [
+              {'subtopic': 'solar', 'status': 'well_covered', ...},
+              {'subtopic': 'wind', 'status': 'well_covered', ...},
+              {'subtopic': 'geothermal', 'status': 'missing', ...},
+              {'subtopic': 'tidal', 'status': 'missing', ...},
+              {'subtopic': 'biomass', 'status': 'missing', ...},
+              {'subtopic': 'fusion', 'status': 'missing', ...},
+              {'subtopic': 'hydropower', 'status': 'missing', ...},
+              {'subtopic': 'green hydrogen', 'status': 'missing', ...}
+          ]}
+          (id=toolu_01XkPbXeVQZekDK7QFUXJ2Ub)
+
+18:35:48  iteration 1: delegated 2 -> coverage 25% -> gaps ['geothermal', 'tidal',
+            'biomass', 'fusion', 'hydropower', 'green hydrogen']
+18:35:48  Coverage 25% after 1 iteration(s); gaps: ['geothermal', 'tidal', 'biomass',
+            'fusion', 'hydropower', 'green hydrogen']
+18:35:48  Never delegated in round 1: ['geothermal', 'tidal', 'biomass', 'fusion'] -> root
+            cause: the coordinator's decomposition, not the subagents
+18:35:48  Run 'capped': dispatcher 25% -> coordinator 25% after 1 round(s), categories
+            still missing: ['geothermal', 'tidal', 'biomass', 'fusion']
 ```
 
 | Variable / field | Value |

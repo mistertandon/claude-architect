@@ -1,0 +1,1375 @@
+# POC 1: The Agent Tool Is the Gate
+
+> **File:** `poc1_gate_test.py` (with `coordinator.py`, `attribution_setup.py`, `attribution_check.py` and `common.py`)
+> **Domain:** 01 Agentic Architecture & Orchestration → 03 Subagent Invocation and Context Passing
+> **SDK:** Claude Agent SDK for Python (`claude-agent-sdk >=0.2.174,<0.3`; 0.2.181 in the folder's `.venv`)
+> **Page:** https://claude.ai/artifact/7w99zMyScNmahFt8cZrRhp
+
+---
+
+## 1. What this POC proves
+
+The same coordinator, the same three subagent definitions and the same request run twice. The only change is whether the session has the `Agent` tool. Every claim below is checked against one real run: `logs/poc1_gate_test_20261113_203231.log`.
+
+| # | Idea | Where it shows up in the code |
+|---|------|------------------------------|
+| 1 | **The `Agent` tool is the hard gate.** With it, the coordinator spawns both research subagents. Without it, no subagent can start, even though the prompt asks for them and `agents=AGENTS` still defines them. | `tools=["Agent"] if agent_tool else []` in `build_pipeline_options()`; `RUNS` in `poc1_gate_test.py` |
+| 2 | **The gate is fixed when `query()` starts.** The session's tool list arrives in the `system:init` message. The Agent tool is listed there as `Task`. | `init_tools` in `run_coordinator()`; the `Run '...': session tools ...` log line |
+| 3 | **Each subagent's tools match its role.** The web-searcher can only search; the doc-analyst can only list and read documents. | `tools=[SOURCE_TOOLS[0]]` and `tools=SOURCE_TOOLS[1:]` in `AGENTS` |
+| 4 | **A finding keeps content apart from metadata.** `claim` and `analysis` say what was found; `source_url`, `document_name`, `page_number`, `confidence` and `retrieved_by` say where it came from. | `FINDING_FORMAT`, `CONTENT_FIELDS`, `METADATA_FIELDS` |
+| 5 | **A subagent's report is text.** Python takes its first JSON object and ignores the rest. | `parse_json_object()`, `parse_findings()` |
+| 6 | **Sequential delegation costs time.** Two Agent calls in two responses run one after the other; the round takes the sum of both. | `SEQUENTIAL_RULE`; `delegation_timing()`; the `Delegation:` log line |
+
+The pattern in one line:
+
+```
+gate on:  coordinator ──Agent──▶ web-searcher ──report──▶ coordinator ──Agent──▶ doc-analyst ──report──▶ coordinator
+gate off: coordinator (no Agent tool) ──▶ no subagent can start, whatever the prompt says
+```
+
+---
+
+## 2. The files involved
+
+```
+03-Subagent-Invocation-and-Context-Passing/
+├── .env / .env.example     ← ANTHROPIC_API_KEY, MODEL_ID, MAX_TURNS, MAX_BUDGET_USD
+├── requirements.txt        ← claude-agent-sdk >=0.2.174,<0.3 and python-dotenv
+├── common.py               ← Settings, load_settings(), setup_logging(), log_model_io()
+├── attribution_setup.py    ← mock Tessaly sources, 3 tools, the finding format, AGENTS, build_pipeline_options()
+├── coordinator.py          ← run_coordinator(): one coordinator call, its Agent calls with timing, init_tools
+├── attribution_check.py    ← delegation_timing() (used here) and POC 2's handoff checks
+├── poc1_gate_test.py       ← entry point: 2 runs, gate on and gate off
+├── poc2_pipeline.py        ← POC 2: the handoff to the synthesizer (not covered here)
+└── logs/
+    └── poc1_gate_test_20261113_203231.log   ← the real run used in sections 3.2 and 5
+```
+
+Every snippet in this article is copied from these files, logging statements included. Each logging statement is named with the log line it writes, so you can find its output in the log file.
+
+The responsibilities split like this:
+- `common.py` covers **configuration and observability**: the model and the limits, and one log line per model input or output, tagged with its agent.
+- `attribution_setup.py` covers **capabilities** (the three source tools, the three subagents), the **contract** (the finding format) and the **guardrails** (the options of every coordinator call, including the gate).
+- `coordinator.py` covers **orchestration**: stream one coordinator call and record what crossed it.
+- `attribution_check.py` covers **measurement**: here, the timing of the delegation round.
+- `poc1_gate_test.py` covers **the experiment**: gate on, gate off.
+
+---
+
+## 3. End-to-end execution flow
+
+### 3.1 The big picture
+
+```
+python poc1_gate_test.py
+        │
+        ▼
+asyncio.run(main())                                                     [poc1_gate_test.py]
+        │
+        ├─▶ load_settings()                                             [common.py]
+        ├─▶ setup_logging("poc1_gate_test")                             [common.py]
+        │
+        └─▶ for name, switches in RUNS:                                 ("gate on", {}), ("gate off", {"agent_tool": False})
+               │
+               ├─▶ build_pipeline_options(settings, **switches)         [attribution_setup.py]
+               │      gate on:  tools=["Agent"], allowed_tools=["Agent", 3 source tools]
+               │      gate off: tools=[],        allowed_tools=[3 source tools], disallowed_tools += ["Agent"]
+               │
+               ├─▶ result = run_coordinator(RESEARCH_PROMPT, options)   [coordinator.py]   → one query() call
+               │
+               ├─▶ log.info("Run '%s': session tools %s -> %d Agent call(s)")
+               ├─▶ for call in result["agent_calls"]:
+               │      findings = parse_findings(call["report"])         [attribution_setup.py]
+               │      log.info("%s returned %d findings, missing fields: %s")
+               └─▶ if result["agent_calls"]:
+                      timing = delegation_timing(result["agent_calls"]) [attribution_check.py]
+                      log.info("Delegation: %d response(s), overlap=%s, %.1f s in all (...)")
+```
+
+Inside `run_coordinator()`, for the gate-on run. The right-hand column names the log line each step writes.
+
+```
+run_coordinator(prompt, options)                                                       [coordinator.py]
+   │
+   ├─ log.info("MODEL INPUT   prompt ...")                                           → log: prompt
+   └─▶ async for message in query(prompt=prompt, options=options):
+          │
+          │   ┌──────────────────── SDK-owned: one coordinator call ────────────────────────┐
+          │   │ SystemMessage(subtype="init"): the session's tool list, fixed from now on   │  (not logged: read into init_tools)
+          │   │ ┌─▶ coordinator Claude responds                                             │
+          │   │ │     └─ tool_use Agent {subagent_type: web-searcher, prompt}  (id = A)     │  → log: tool_use  [coordinator]
+          │   │ │          ┌── web-searcher: its own prompt + the brief, tool: web_search ─┐│
+          │   │ │          │  tool_use → web_search() → tool_result → final JSON = report  ││  → log: tool_use / tool_result [web-searcher]
+          │   │ │          └───────────────────────────────────────────────────────────────┘│
+          │   │ │        tool_result (tool_use_id = A) = the report                         │  → log: tool_result [coordinator]
+          │   │ ├─▶ next response: tool_use Agent {doc-analyst} (id = B), same pattern      │
+          │   │ └─▶ next response: final text, no tool_use (stop_reason = end_turn)         │  → log: text
+          │   │ yields ResultMessage (success / error_*)                                    │  → log: stop_reason
+          │   └─────────────────────────────────────────────────────────────────────────────┘
+          │
+          ├─ log_model_io(message, agent_names)   writes the log lines marked above
+          ├─ SystemMessage init → init_tools = message.data["tools"]
+          ├─ hub's Agent call   → agent_calls[id] = {..., "message_id", "started"}
+          ├─ any other tool call→ research_calls.append({...})
+          ├─ its tool_result    → agent_calls[id]["report"], ["finished"]
+          ├─ ResultMessage      → subtype; if "success": output = result
+          └─ ResultError        → log.error("The coordinator call failed: %s")         → log: (none in this run)
+```
+
+In the gate-off run, the `SDK-owned` box holds only one coordinator response: text, then `end_turn`. There is no Agent tool to call.
+
+### 3.2 Messages your `async for` receives (the gate-on run, real output)
+
+The values below come from the real run on 2026-11-13, recorded in `logs/poc1_gate_test_20261113_203231.log`. The log holds only model input, model output and the script's own summary lines. Each log line comes from one statement in the code:
+
+| Log line tag | Message class yielded by `query()` | Field logged | Written by |
+|--------------|------------------------------------|--------------|------------|
+| `MODEL INPUT   prompt` | *(none: the `prompt` passed to `run_coordinator()`)* | `prompt` | `log.info("MODEL INPUT   prompt ...")` in `run_coordinator()` (`coordinator.py`) |
+| `MODEL OUTPUT  thinking` | `AssistantMessage` → `ThinkingBlock` | `block.thinking`, only when non-empty | `log_model_io()` (`common.py`) |
+| `MODEL OUTPUT  text` | `AssistantMessage` → `TextBlock` | `block.text` | `log_model_io()` |
+| `MODEL OUTPUT  tool_use` | `AssistantMessage` → `ToolUseBlock` | `block.name`, `block.input`, `block.id` | `log_model_io()` |
+| `MODEL INPUT   tool_result` | `UserMessage` → `ToolResultBlock` | `block.content`, `block.tool_use_id`, `block.is_error` | `log_model_io()` |
+| `MODEL OUTPUT  stop_reason` | `ResultMessage` | `message.stop_reason`, `message.subtype` | `log_model_io()` |
+| `[coordinator]`, `[web-searcher]`, `[doc-analyst]` | the message the line came from | `message.parent_tool_use_id`: `None` gives `coordinator`; any other value gives the `subagent_type` of the Agent call with that id | `who = ...` at the top of `log_model_io()` |
+| `Run '...': session tools [...] -> N Agent call(s)` | `SystemMessage` with `subtype == "init"` | `message.data["tools"]`, kept in `init_tools` | `log.info(...)` in `main()` (`poc1_gate_test.py`) |
+| `<agent> returned N findings, missing fields: ...` | *(none: Python parses each report)* | `parse_findings(call["report"])` | `log.info(...)` in `main()` |
+| `Delegation: N response(s), overlap=..., ... s in all (...)` | *(none: Python timing)* | `delegation_timing(result["agent_calls"])` | `log.info(...)` in `main()` |
+| `SDK error: ...`, `<agent>'s report: ...`, `The coordinator call failed: ...` | *(none)* | the exception | `main()` and `run_coordinator()`. None in this log |
+
+The gate-on run as it really streamed, in order, inside the **one** `async for` loop:
+
+```
+20:32:31  (input)                            [coordinator]                     log: prompt
+            prompt = Research this question with both research subagents, then reply with one line saying
+                       both reports are in. Do not call the synthesizer. Question: What is known about the
+                       Tessaly sodium-ion grid battery pilot at Kestrel Ridge?
+
+          SystemMessage(subtype="init")                                         not logged
+            data["tools"] = ['Task', 'mcp__sources__list_documents', 'mcp__sources__read_document',
+                             'mcp__sources__web_search']                        ← shown later by the Run line
+
+20:32:34  AssistantMessage › ToolUseBlock    [coordinator]                     log: tool_use
+            name  = "Agent"
+            input = {'description': 'Web research on Tessaly pilot', 'subagent_type': 'web-searcher',
+                     'prompt': 'Research question: What is known about ... at Kestrel Ridge? Search the web
+                                and return findings with source URLs and titles.'}
+            id    = "toolu_018gT428ABcMSKohJehdcwAb"                          ← call A
+
+20:32:36  AssistantMessage › ToolUseBlock    [web-searcher]                    log: tool_use
+            name  = "mcp__sources__web_search"
+            input = {'query': 'Tessaly sodium-ion grid battery pilot Kestrel Ridge'}
+            id    = "toolu_01EBrAsepeiznTWeVHKuLLog"
+20:32:36  UserMessage › ToolResultBlock      [web-searcher]                    log: tool_result
+            content     = [{'type': 'text', 'text': '[{"title": "Tessaly Grid Pilot: Year-One Results",
+                            "url": "https://example.com/tessaly/year-one-results", "page": 3, ...}, ...3 results]'}]
+            tool_use_id = "toolu_01EBrAsepeiznTWeVHKuLLog"                    ← same id as the request
+            is_error    = None
+
+20:32:41  UserMessage › ToolResultBlock      [coordinator]                     log: tool_result
+            content     = [{'type': 'text', 'text': '  <tools-used-before-summary>mcp__sources__web_search
+                            </tools-used-before-summary>\n  \n[Subagent hand-back] ... The report follows:\n
+                            {"findings": [ ...3 findings... ]}\nagentId: abc19e29b184031ba\n<usage>
+                            subagent_tokens: 2542\ntool_uses: 1\nduration_ms: 6223</usage>'}]
+            tool_use_id = "toolu_018gT428ABcMSKohJehdcwAb"                    ← call A: the report is its tool_result
+            is_error    = None
+
+20:32:42  AssistantMessage › ToolUseBlock    [coordinator]                     log: tool_use
+            name  = "Agent"
+            input = {'description': 'Local library research on Tessaly', 'subagent_type': 'doc-analyst',
+                     'prompt': 'Research question: What is known about ... at Kestrel Ridge? Read the local
+                                document library and return analysis with page references.'}
+            id    = "toolu_01Agri6En2WY5yxii7aKDurq"                          ← call B, a new response
+
+20:32:44  ... list_documents, then read_document × 2 [doc-analyst], each tool_use followed by its
+              tool_result, all is_error=None (section 5.1) ...
+
+20:32:50  UserMessage › ToolResultBlock      [coordinator]                     log: tool_result
+            content     = [{'type': 'text', 'text': '  <tools-used-before-summary>mcp__sources__list_documents,
+                            mcp__sources__read_document</tools-used-before-summary>\n ... The report follows:\n
+                            {"findings": [ ...4 findings... ]}\nagentId: ace01ab6aef892839\n<usage>
+                            subagent_tokens: 2997\ntool_uses: 3\nduration_ms: 7995</usage>'}]
+            tool_use_id = "toolu_01Agri6En2WY5yxii7aKDurq"                    ← call B
+            is_error    = None
+
+20:32:51  AssistantMessage › TextBlock       [coordinator]                     log: text
+            text = Both reports are in: the web-searcher returned 3 findings and the doc-analyst returned 4.
+20:32:52  ResultMessage                      [coordinator]                     log: stop_reason
+            stop_reason = "end_turn", subtype = "success"
+```
+
+What to notice in the real data:
+- **The gate shows in two places.** The `init` tool list (read by `run_coordinator()`, printed by the `Run` line) holds `Task`, and the coordinator's two `tool_use` lines name `Agent`. Same tool, two names: the code matches both (`block.name in ("Agent", "Task")`).
+- **One Agent call per response.** Call B (20:32:42) came after report A (20:32:41), as `SEQUENTIAL_RULE` asks. `delegation_timing()` counted 2 distinct `message_id`s.
+- **Role-scoped tools held.** Every `[web-searcher]` call is `web_search`; every `[doc-analyst]` call is `list_documents` or `read_document`. No research call is tagged `[coordinator]`.
+- **The brief carried the full question.** Both Agent prompts start with `Research question: What is known about ...`, as the coordinator prompt asks ("give each research subagent the full research question").
+- **The report is text around JSON.** It starts with a `<tools-used-before-summary>` note and the `[Subagent hand-back]` frame, and ends with `agentId` and a `<usage>` block. The POC adds none of this. `parse_json_object()` starts at the first `{` and stops at the end of that object, so the frame and the trailer don't matter.
+- **`tool_uses` matches the log.** The web-searcher's `<usage>` says `tool_uses: 1`, the doc-analyst's `tool_uses: 3`: exactly the `[web-searcher]` and `[doc-analyst]` `tool_use` lines.
+- **No subagent narration.** No `text` line is tagged `[web-searcher]` or `[doc-analyst]`. A subagent's final message reaches the stream only as its Agent call's `tool_result`.
+- **Not shown:** the `SystemMessage` itself, cost and turn counts are in the stream but not in the log; `log_model_io()` logs only model I/O. The options ask for summarized thinking, and this run has no `thinking` line (the gate-off run has one).
+
+> The `UserMessage` items are **not** typed by a human. They carry tool results: the source results inside a subagent, and each subagent's report for the coordinator.
+
+---
+
+## 4. Code walkthrough
+
+The snippets follow the order in which the code runs: the script first, then the module functions it calls. Where a snippet writes log lines, they're shown under it, copied from the real log (long values trimmed with `...`).
+
+### 4.1 Module docstring: the experiment in two lines
+
+```python
+"""
+POC 1 - The Agent tool is the gate; subagents return content + metadata
+========================================================================
+The same coordinator, the same subagent definitions and the same request, run twice:
+
+    gate on:   tools=["Agent"]  -> web-searcher, then doc-analyst (one after the other, as SEQUENTIAL_RULE says)
+    gate off:  tools=[]         -> no subagent can start, although the prompt asks for them by role
+
+Each research subagent answers with JSON findings that keep content (claim, analysis) apart from metadata
+(source_url, document_name, page_number, confidence, retrieved_by). Besides model I/O, the log shows per run:
+the session's tools and the Agent calls, the findings per subagent, and the timing of the round.
+
+Run:  python poc1_gate_test.py     (2 runs; an optional third is commented out)
+"""
+```
+
+**Why it matters:** the docstring names the one variable of the experiment, `tools`, and the three summary lines `main()` writes per run. It also says the third run is optional and commented out: the real log has only two runs, so the `unlisted` case (E1) is explained in this article but not shown in the log.
+
+---
+
+### 4.2 Imports
+
+```python
+import asyncio
+import sys
+
+from claude_agent_sdk import ClaudeSDKError
+
+from attribution_check import delegation_timing
+from attribution_setup import CONTENT_FIELDS, METADATA_FIELDS, QUESTION, build_pipeline_options, parse_findings
+from common import load_settings, log, setup_logging
+from coordinator import run_coordinator
+```
+
+| Import | What it brings in | Why this file needs it |
+| --- | --- | --- |
+| `asyncio`, `sys` | The event loop, `sys.exit()` | `query()` is async; the exit code goes to the shell |
+| `ClaudeSDKError` | The SDK's base error | Stops the script on an SDK runtime failure |
+| `delegation_timing` | From `attribution_check` | Measures the research round: responses, overlap, seconds |
+| `CONTENT_FIELDS`, `METADATA_FIELDS` | From `attribution_setup` | The 7 keys every finding must have |
+| `QUESTION` | From `attribution_setup` | The research question, built into `RESEARCH_PROMPT` |
+| `build_pipeline_options` | From `attribution_setup` | The options of each run, with the gate on or off |
+| `parse_findings` | From `attribution_setup` | Pulls the findings out of a report's text |
+| `load_settings`, `log`, `setup_logging` | From `common` | Settings, the `"poc"` logger and its two handlers |
+| `run_coordinator` | From `coordinator` | Streams one coordinator call and records what crossed it |
+
+---
+
+### 4.3 The request and the run table
+
+```python
+RESEARCH_PROMPT = (
+    "Research this question with both research subagents, then reply with one line saying both reports are in. "
+    f"Do not call the synthesizer. Question: {QUESTION}"
+)
+
+RUNS = [  # (name, switches for build_pipeline_options())
+    ("gate on", {}),  # Agent in tools and in allowed_tools: the sequential research round
+    ("gate off", {"agent_tool": False}),  # Agent removed from the tool set: no subagent can run
+    # ("unlisted", {"approve_agent": False}),  # optional (E1): Agent in tools but NOT in allowed_tools: still spawns
+]
+```
+
+**Why it matters:**
+- **One request for both runs.** `RESEARCH_PROMPT` asks for both research subagents in plain words. If the prompt could open the gate, the gate-off run would spawn them too. It doesn't.
+- **"Do not call the synthesizer"** keeps this POC to the research round. The synthesizer is defined in `AGENTS`, but POC 2 is where it runs.
+- **`RUNS` changes one switch.** `{}` uses the defaults (gate on). `{"agent_tool": False}` closes the gate. Everything else, from the system prompt to `agents=AGENTS`, stays the same.
+- **The third run is commented out.** `approve_agent=False` keeps `Agent` in `tools` but leaves it out of `allowed_tools`. The comment states the result: it still spawns.
+
+**Agentic concept:** a controlled experiment on capability. Same model, same prompt, same definitions; only the tool set changes.
+
+The prompt both runs sent, logged by `run_coordinator()`:
+
+```
+20:32:31  MODEL INPUT   prompt       [coordinator] Research this question with both research subagents, then reply with one line saying both reports are in. Do not call the synthesizer. Question: What is known about the Tessaly sodium-ion grid battery pilot at Kestrel Ridge?
+20:32:53  MODEL INPUT   prompt       [coordinator] Research this question with both research subagents, then reply with one line saying both reports are in. Do not call the synthesizer. Question: What is known about the Tessaly sodium-ion grid battery pilot at Kestrel Ridge?
+```
+
+---
+
+### 4.4 `main()`: two runs and three summary lines each
+
+#### a) Setup
+
+```python
+async def main() -> int:
+    try:
+        settings = load_settings()
+        setup_logging("poc1_gate_test")
+    except (OSError, RuntimeError) as exc:
+        print(f"Setup failed: {exc}")
+        return 1
+```
+
+**Why it matters:** settings are read before logging exists, so a setup error is printed, not logged, and leaves no log file. Setup writes no log line. The log file's name records when it ran: `poc1_gate_test_20261113_203231.log`, the second of the first prompt line.
+
+#### b) One coordinator call per run, and the gate line
+
+```python
+    for name, switches in RUNS:
+        try:
+            result = await run_coordinator(RESEARCH_PROMPT, build_pipeline_options(settings, **switches))
+        except ClaudeSDKError as exc:  # Claude Code not found, its process crashed, ...
+            log.error("SDK error: %s", exc)
+            return 1
+        # The gate is the session's tool set, fixed when query() starts ("Task" is the Agent tool's init name).
+        log.info("Run '%s': session tools %s -> %d Agent call(s)", name, result["init_tools"], len(result["agent_calls"]))
+```
+
+**Why it matters:**
+- `build_pipeline_options(settings, **switches)` builds fresh options per run. Each run is a separate `query()`: the gate-off run has no memory of the gate-on run.
+- **The gate line prints the cause and the effect side by side.** `result["init_tools"]` is the tool list the session started with. `len(result["agent_calls"])` is what the coordinator did with it.
+- `ClaudeSDKError` ends the script with `1`. A failed coordinator call (`ResultError`) is caught inside `run_coordinator()` instead, and logged there.
+
+**Agentic concept:** the gate is checked against the session, not against the prompt.
+
+The two lines it wrote:
+
+```
+20:32:53  Run 'gate on': session tools ['Task', 'mcp__sources__list_documents', 'mcp__sources__read_document', 'mcp__sources__web_search'] -> 2 Agent call(s)
+20:32:59  Run 'gate off': session tools ['mcp__sources__list_documents', 'mcp__sources__read_document', 'mcp__sources__web_search'] -> 0 Agent call(s)
+```
+
+The only difference between the two tool lists is `Task`. The three source tools are in **both** lists, because `mcp_servers` and `allowed_tools` register them for every call. The gate-off coordinator could have researched itself; it didn't (section 5.2).
+
+#### c) Parsing each report and checking its fields
+
+```python
+        for call in result["agent_calls"]:
+            try:
+                findings = parse_findings(call["report"] or "")
+            except ValueError as exc:
+                log.error("%s's report: %s", call["subagent_type"], exc)
+                continue
+            missing = sorted({key for f in findings for key in CONTENT_FIELDS + METADATA_FIELDS if key not in f})
+            log.info("%s returned %d findings, missing fields: %s", call["subagent_type"], len(findings), missing or "none")
+```
+
+**Why it matters:**
+- `call["report"] or ""` turns a missing report into an empty string, so `parse_findings()` raises a `ValueError` the loop can log, instead of a `TypeError`.
+- A report that isn't JSON is logged and skipped; the other subagent's report is still checked.
+- `missing` collects every required key that any finding lacks. It checks that keys **exist**. It doesn't check their values.
+
+The lines it wrote:
+
+```
+20:32:53  web-searcher returned 3 findings, missing fields: none
+20:32:53  doc-analyst returned 4 findings, missing fields: none
+```
+
+> **What the presence check can't see.** All 7 keys were there, so the check passed. But the `retrieved_by` values in the real reports are `"web-search-specialist"` and `"document analyst"`, not the agent names `web-searcher` and `doc-analyst`. `FINDING_FORMAT` asks for "your agent name", and a subagent never sees its name: its context holds only its own system prompt ("You are a web-search specialist") and the brief. Section 5.1 has the details.
+
+#### d) Timing the round
+
+```python
+        if result["agent_calls"]:  # compare with POC 2's parallel round (C16)
+            timing = delegation_timing(result["agent_calls"])
+            log.info("Delegation: %d response(s), overlap=%s, %.1f s in all (%s)",
+                     timing["responses"], timing["overlap"], timing["delegation_seconds"],
+                     ", ".join(f"{agent} {seconds:.1f} s" for agent, seconds in timing["durations"].items()))
+    return 0
+```
+
+**Why it matters:** the timing line is the baseline for POC 2. Here, two responses and no overlap: the round takes about the sum of both subagents. POC 2 spawns both in one response and compares. The `if` skips the line in the gate-off run, which has no Agent calls to time.
+
+The line it wrote:
+
+```
+20:32:53  Delegation: 2 response(s), overlap=False, 15.9 s in all (web-searcher 6.2 s, doc-analyst 8.0 s)
+```
+
+`6.2 + 8.0 = 14.2 s` of subagent work in a `15.9 s` round. The other 1.7 s is the coordinator reading report A and writing call B.
+
+**Log lines:** no `SDK error:` or `<agent>'s report:` line in this run, so `main()` returned `0`.
+
+---
+
+### 4.5 `__main__`
+
+```python
+if __name__ == "__main__":
+    sys.exit(asyncio.run(main()))
+```
+
+`asyncio.run` starts the event loop and runs `main()`; `sys.exit` passes `0` or `1` to the shell.
+
+---
+
+### 4.6 `build_pipeline_options()`: where the gate lives (from `attribution_setup.py`)
+
+```python
+def build_pipeline_options(
+    settings: Settings, parallel: bool = False, agent_tool: bool = True, approve_agent: bool = True
+) -> ClaudeAgentOptions:
+    """Options for one coordinator call. agent_tool=False closes the gate: no subagent can start (C1, C3)."""
+    sources_server = create_sdk_mcp_server(name=SERVER_NAME, version="1.0.0",
+                                           tools=[web_search, list_documents, read_document])
+    return ClaudeAgentOptions(
+        model=settings.model_id,
+        system_prompt=coordinator_prompt(parallel),  # POC 1: sequential; POC 2: parallel (C15)
+        tools=["Agent"] if agent_tool else [],  # THE GATE: the session's tool set is fixed when query() starts
+        agents=AGENTS,  # the three spokes (they still can't run without the Agent tool)
+        mcp_servers={SERVER_NAME: sources_server},  # the mock tools, used by the subagents
+        # Exam answer: Agent must be in allowedTools. In the SDK that only pre-approves it (E1).
+        allowed_tools=(["Agent"] if agent_tool and approve_agent else []) + SOURCE_TOOLS,
+        disallowed_tools=["Agent(fork)"] + ([] if agent_tool else ["Agent"]),  # no forks (02 E1); gate off: deny Agent
+        setting_sources=[],  # ignore ~/.claude settings, CLAUDE.md and hooks: the same run on any machine
+        env={
+            "ENABLE_TOOL_SEARCH": "false",  # send all tool schemas up front: no ToolSearch calls
+            "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1",  # the coordinator waits for every report (02 E2, C17)
+            "CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS": "1",  # only our spokes, no general-purpose fallback (02 E3)
+        },
+        thinking={"type": "adaptive", "display": "summarized"},  # return Claude's reasoning text (same cost)
+        max_turns=settings.max_turns,  # safety cap per coordinator call (01 C16)
+        max_budget_usd=settings.max_budget_usd,  # cost guard per call, subagents included
+    )
+```
+
+| Option | Gate on (`{}`) | Gate off (`agent_tool=False`) | Agentic concept |
+|--------|----------------|-------------------------------|-----------------|
+| `tools` | `["Agent"]` | `[]` | **The hard gate.** No `Agent` tool, no spawn. |
+| `allowed_tools` | `["Agent"]` + 3 source tools | 3 source tools | **Pre-approval only.** The exam's "must be in `allowedTools`"; the code lists it in both places. |
+| `disallowed_tools` | `["Agent(fork)"]` | `["Agent(fork)", "Agent"]` | A deny rule closes the gate a second time. |
+| `agents` | `AGENTS` | `AGENTS` | **Definitions aren't permission.** All three spokes stay defined with the gate off. |
+| `mcp_servers` | the 3 source tools | the 3 source tools | The subagents' tools exist in both runs, and the coordinator sees them too. |
+| `system_prompt` | `coordinator_prompt(False)` | same | `SEQUENTIAL_RULE` (section 4.7). |
+| `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` | set | set | **Synchronous delegation:** each Agent call returns the report itself. |
+| `CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1` | set | set | Only our three spokes; no general-purpose fallback. |
+| `thinking` | summarized | summarized | The gate-off run logged one `thinking` line. |
+| `max_turns`, `max_budget_usd` | from `.env` | from `.env` | Runaway and cost guards per coordinator call. |
+
+**Why it matters:**
+- **`tools` is the gate, fixed when `query()` starts.** The `init` tool list in the log is the proof: `Task` in the gate-on run, absent in the gate-off run.
+- **`allowed_tools` is not the gate in the SDK.** The comment says it: listing `Agent` there "only pre-approves it". That's why the commented-out `unlisted` run (Agent in `tools`, not in `allowed_tools`) would still spawn. The exam's answer stays "`Agent` (or `Task`) must be in `allowedTools`", so the code puts it in both lists.
+- **`parallel`** is POC 2's switch: it swaps `SEQUENTIAL_RULE` for `PARALLEL_RULE` in the system prompt. POC 1 always uses the default, `False`.
+
+> **Note what the gate doesn't remove.** The source tools are registered for the whole coordinator call, so with the gate off they are the coordinator's only tools. "Never research yourself" is a prompt rule, not a tool restriction. The real gate-off run respected it; nothing in the options forces that.
+
+---
+
+### 4.7 `coordinator_prompt()` and the two delegation rules (from `attribution_setup.py`)
+
+```python
+SEQUENTIAL_RULE = "Call web-searcher first and wait for its report; only then call doc-analyst."
+PARALLEL_RULE = ("web-searcher and doc-analyst are independent: call both in one response, with two Agent tool "
+                 "calls, and wait for both reports before you go on.")
+
+
+def coordinator_prompt(parallel: bool) -> str:
+    return ("You are the coordinator of a research team. Never research yourself: delegate. web-searcher finds web "
+            "sources; doc-analyst reads the local document library. "
+            + (PARALLEL_RULE if parallel else SEQUENTIAL_RULE)
+            + " Subagents start with no context, so give each research subagent the full research question. "
+            "Call synthesizer only when your task asks for a brief: call it last, and pass it one JSON object "
+            '{"findings": [...]} holding every finding from both reports, unchanged. Never drop, shorten or '
+            "summarize any field.")
+```
+
+| Rule in the prompt | What the real gate-on run did |
+|--------------------|-------------------------------|
+| "Never research yourself: delegate." | No source tool call is tagged `[coordinator]`. |
+| `SEQUENTIAL_RULE` | web-searcher at 20:32:34, its report at 20:32:41, then doc-analyst at 20:32:42. |
+| "give each research subagent the full research question" | Both briefs open with `Research question: What is known about the Tessaly ... at Kestrel Ridge?` |
+| "Call synthesizer only when your task asks for a brief" | No synthesizer call. |
+
+**Why it matters:** the order of delegation is a prompt rule, so the same options can run sequential (POC 1) or parallel (POC 2). The sequential round here is deliberate: it's the slow baseline. The research tasks don't depend on each other, so waiting for the web-searcher before starting the doc-analyst only adds time.
+
+**Agentic concept:** the coordinator's system prompt sets the delegation strategy; the tool set sets what's possible.
+
+---
+
+### 4.8 `AGENTS`: three spokes with role-scoped tools (from `attribution_setup.py`)
+
+```python
+AGENTS = {
+    "web-searcher": AgentDefinition(
+        description="Searches the web for sources on a research question. Returns findings with source URLs and titles.",
+        prompt=("You are a web-search specialist. Call web_search for the question in your task and report one "
+                "finding per search result, using the result's title as document_name and its page as page_number. "
+                + FINDING_FORMAT),
+        tools=[SOURCE_TOOLS[0]],  # search tools only
+        model="inherit",
+        maxTurns=10,
+    ),
+    "doc-analyst": AgentDefinition(
+        description="Reads the local document library for a research question. Returns analysis with page references.",
+        prompt=("You are a document analyst. Call list_documents, read every document with read_document, and report "
+                "one finding per page that states a figure, using the document's title as document_name. "
+                + FINDING_FORMAT),
+        tools=SOURCE_TOOLS[1:],  # file-reading tools only
+        model="inherit",
+        maxTurns=10,
+    ),
+    "synthesizer": AgentDefinition(
+        description="Writes the final sourced brief from the findings in its task. Call it last, after both research reports.",
+        prompt=('You are a synthesis writer with no tools: use only the findings in your task. Your final message must be '
+                'only a JSON object {"statements": [{"text": "...", "citations": [{"source_url": "...", "page_number": 1}]}]}. '
+                "Cite the source_url and page_number of every finding a statement uses, copied exactly from the findings. "
+                "If a finding has no source_url or page_number, still write the statement but leave its citations empty: "
+                "never invent a citation."),
+        tools=[],  # no tools: it reasons only over what its task contains
+        model="inherit",
+        maxTurns=5,
+    ),
+}
+```
+
+| Field | web-searcher | doc-analyst | Seen in the real gate-on run |
+|-------|--------------|-------------|------------------------------|
+| `description` | "Returns findings with source URLs and titles." | "Returns analysis with page references." | The coordinator's briefs echo them: "return findings with source URLs and titles", "return analysis with page references". |
+| `prompt` | one finding per search result; title → `document_name`, page → `page_number` | one finding per page that states a figure | 3 findings (one per result); 4 findings (the audit's page 1 has no figure, so it was skipped). |
+| `tools` | `mcp__sources__web_search` | `list_documents`, `read_document` | `[web-searcher]` called only `web_search`; `[doc-analyst]` only the other two. |
+| `maxTurns` | 10 | 10 | Not reached: 1 and 3 tool uses. |
+
+**Why it matters:**
+- Each `AgentDefinition` has the three fields the exam names: a `description` (how the coordinator chooses), a system prompt (`prompt`) and a tool restriction (`tools`).
+- **Role-specific output.** The web-searcher's metadata comes from search results (URL, title, result page); the doc-analyst's from documents (library URL, document title, `[page N]` marker). Each prompt says which tool field goes into which finding field.
+- **The synthesizer has `tools=[]`.** It can only use what its brief holds. That's the point of POC 2: if its brief has no metadata, it can't cite.
+
+**Agentic concept: specialization and least privilege.** One role, the tools for that role, nothing else. No spoke has the `Agent` tool.
+
+---
+
+### 4.9 The finding format: content apart from metadata (from `attribution_setup.py`)
+
+```python
+CONTENT_FIELDS = ["claim", "analysis"]  # what was found
+METADATA_FIELDS = ["source_url", "document_name", "page_number", "confidence", "retrieved_by"]  # where it came from
+
+FINDING_FORMAT = (
+    'Your final message must be only a JSON object {"findings": [...]}, with no other text. '
+    'Each finding has exactly these keys. Content: "claim" (one factual sentence) and "analysis" '
+    '(one sentence on why it matters). Metadata: "source_url", "document_name", "page_number" '
+    '(an integer), "confidence" ("high", "medium" or "low") and "retrieved_by" (your agent name). '
+    "Copy source_url, document_name and page_number exactly from the tool output; never invent them."
+)
+```
+
+**Why it matters:**
+- `CONTENT_FIELDS` and `METADATA_FIELDS` are the Python version of a `Finding` type: 2 content keys, 5 metadata keys. `main()` checks reports against them.
+- `FINDING_FORMAT` puts the same contract in words, at the end of both research prompts. It labels which keys are content and which are metadata, gives each a type, and forbids invented sources.
+- **Metadata travels with the claim.** Each finding is self-contained, so any later step (POC 2's synthesizer) can cite it without asking where it came from.
+
+**Agentic concept:** a structured output contract between agents, so attribution survives each handoff.
+
+`attribution_setup.py` also defines `FINDINGS`, the 7 correct findings built from the mock sources. POC 2 uses them as its fixed handoff input; POC 1 doesn't touch them.
+
+What the real reports put in each field:
+
+| Field | web-searcher (3 findings) | doc-analyst (4 findings) |
+|-------|---------------------------|--------------------------|
+| `claim` | the 3 snippets, one lightly reworded ("Tessaly sodium-ion cells are reported to cost $61 per kWh ...") | the 4 page texts with figures, some with context added ("... in the Tessaly sodium-ion pilot at Kestrel Ridge") |
+| `source_url` | the 3 result URLs, exact | the 2 library URLs, exact |
+| `document_name` | the 3 result titles | `Tessaly Pilot Safety Audit` (×3), `Kestrel Ridge Board Minutes, March 2026` |
+| `page_number` | `3`, `2`, `1` (integers) | `2`, `5`, `7`, `4` (integers) |
+| `confidence` | `medium` for all 3 ("it comes from a search snippet") | `high` for all 4 |
+| `retrieved_by` | `web-search-specialist` | `document analyst` |
+
+Every URL, title and page number matches the tool output exactly. Only `retrieved_by` drifted, for the reason in section 4.4 c.
+
+---
+
+### 4.10 `parse_json_object()` and `parse_findings()`: a report is text (from `attribution_setup.py`)
+
+```python
+def parse_json_object(text: str) -> Any:
+    """A subagent's report is TEXT: take its first JSON object and ignore what follows, such as 'agentId: ...' (E2)."""
+    if "{" not in text:
+        raise ValueError("the report holds no JSON object")
+    value, _ = json.JSONDecoder().raw_decode(text[text.index("{"):])
+    return value
+
+
+def parse_findings(report: str) -> list[dict[str, Any]]:
+    findings = parse_json_object(report).get("findings")
+    if not isinstance(findings, list):
+        raise ValueError("the report's JSON has no 'findings' list")
+    return findings
+```
+
+**Why it matters:**
+- An Agent call's result is not `structured_output`; it's the subagent's final message, wrapped. In this log the wrap is a `<tools-used-before-summary>` note, the `[Subagent hand-back]` frame, and an `agentId` / `<usage>` trailer.
+- `text.index("{")` skips everything before the JSON. `raw_decode()` reads exactly one JSON value and returns where it stopped, so the trailer is ignored. `json.loads()` on the whole text would fail.
+- Both failure cases raise `ValueError`, which `main()` catches per report.
+
+**Agentic concept:** parse model output defensively, at a defined boundary; never assume the text is only JSON.
+
+---
+
+### 4.11 `run_coordinator()`: 02's runner, plus the gate and the timing (from `coordinator.py`)
+
+```python
+async def run_coordinator(prompt: str, options: ClaudeAgentOptions) -> dict[str, Any]:
+    """Stream one coordinator query(). Returns {"output", "agent_calls", "research_calls", "init_tools", "subtype"}.
+
+    agent_calls: one {"id", "subagent_type", "prompt", "report", "message_id", "started", "finished"} per Agent
+        call. started/finished: seconds since this call began, when the call and its report arrived.
+    research_calls: one {"name", "input", "parent_tool_use_id"} per other tool call, from any agent.
+    init_tools: the session's tool list from the system:init message (it names the Agent tool "Task").
+    """
+    log.info("MODEL INPUT   prompt       [coordinator] %s", prompt)
+    begin = time.monotonic()
+    agent_names: dict[str, str] = {}  # Agent call id -> subagent name, for the log tags
+    agent_calls: dict[str, dict[str, Any]] = {}
+    research_calls: list[dict[str, Any]] = []
+    init_tools: list[str] = []
+    output, subtype = None, None
+    try:
+        async for message in query(prompt=prompt, options=options):
+            log_model_io(message, agent_names)
+            if isinstance(message, SystemMessage) and message.subtype == "init":
+                init_tools = message.data.get("tools", [])
+            elif isinstance(message, AssistantMessage):
+                for block in message.content:
+                    if not isinstance(block, ToolUseBlock) or block.name == "StructuredOutput":
+                        continue
+                    if block.name in ("Agent", "Task") and message.parent_tool_use_id is None:  # a spawn
+                        agent_calls[block.id] = {
+                            "id": block.id, "subagent_type": block.input.get("subagent_type"),
+                            "prompt": block.input.get("prompt", ""), "report": None,
+                            "message_id": message.message_id,  # Agent calls in ONE response share it (C15)
+                            "started": time.monotonic() - begin, "finished": None,
+                        }
+                    else:
+                        research_calls.append({"name": block.name, "input": block.input,
+                                               "parent_tool_use_id": message.parent_tool_use_id})
+            elif isinstance(message, UserMessage) and isinstance(message.content, list):
+                for block in message.content:
+                    # A subagent's report is the tool result of the Agent call that spawned it (same id).
+                    if isinstance(block, ToolResultBlock) and block.tool_use_id in agent_calls:
+                        agent_calls[block.tool_use_id]["report"] = text_of(block.content)
+                        agent_calls[block.tool_use_id]["finished"] = time.monotonic() - begin
+            elif isinstance(message, ResultMessage):
+                subtype = message.subtype
+                if message.subtype == "success":
+                    output = message.structured_output if options.output_format else message.result
+            # No `break`: a few system events can still arrive after the ResultMessage.
+    except ResultError as exc:  # raised AFTER the error ResultMessage (already logged), e.g. error_max_turns
+        log.error("The coordinator call failed: %s", exc)
+    return {"output": output, "agent_calls": list(agent_calls.values()), "research_calls": research_calls,
+            "init_tools": init_tools, "subtype": subtype}
+```
+
+What's new compared with topic 02's runner:
+
+| Addition | What it records | Used by |
+|----------|-----------------|---------|
+| `SystemMessage` with `subtype == "init"` → `init_tools` | The session's tool list, fixed at start. It names the Agent tool `Task`. | The `Run '...': session tools ...` line |
+| `message_id` per Agent call | Which coordinator response the call came from. Calls in one response share it. | `delegation_timing()`: `responses` |
+| `started` / `finished` | Seconds since the call began, when the Agent call and its report arrived (`time.monotonic()`) | `delegation_timing()`: durations and overlap |
+| `research_calls` | Every non-Agent tool call, from any agent, with its `parent_tool_use_id` | Proving who researched. Not logged by POC 1; the log tags show the same thing. |
+
+**Why it matters:**
+- **The init message is read, not logged.** `log_model_io()` has no branch for `SystemMessage`, so the tool list reaches the log only through `main()`'s `Run` line.
+- `message.parent_tool_use_id is None` keeps only the coordinator's own Agent calls. A subagent can't spawn (no `Agent` tool), but the check would hold if one could.
+- `StructuredOutput` is skipped, so it never counts as research. POC 1 uses no `output_format`, so none appears.
+- `output` is `message.result` here: the coordinator's final text.
+- `text_of()` (not shown) joins the text blocks of a tool result, as in topic 02.
+
+The log lines the gate-on call wrote are in section 5.1; every `MODEL ...` line comes from `log_model_io()` except the `prompt` line, which comes from the `log.info` at the top of this function.
+
+---
+
+### 4.12 `delegation_timing()`: was the round sequential? (from `attribution_check.py`)
+
+```python
+def delegation_timing(agent_calls: list[dict], names: tuple[str, ...] = ("web-searcher", "doc-analyst")) -> dict:
+    """Were the research subagents spawned in one response, and did they run at the same time? (C15, C16)"""
+    calls = [call for call in agent_calls if call["subagent_type"] in names and call["finished"] is not None]
+    return {
+        "responses": len({call["message_id"] for call in calls}),  # 1 = all spawned in one coordinator response
+        "overlap": len(calls) > 1 and all(c["started"] < d["finished"] for c in calls for d in calls if c is not d),
+        "delegation_seconds": max(c["finished"] for c in calls) - min(c["started"] for c in calls) if calls else 0.0,
+        "durations": {call["subagent_type"]: call["finished"] - call["started"] for call in calls},
+    }
+```
+
+| Key | Formula | Real value | Meaning |
+|-----|---------|-----------|---------|
+| `responses` | distinct `message_id`s | `2` | Two coordinator responses: one spawn each. |
+| `overlap` | every call started before every other finished | `False` | doc-analyst started after the web-searcher finished. |
+| `delegation_seconds` | last `finished` − first `started` | `15.9` | The whole research round. |
+| `durations` | `finished − started` per subagent | web-searcher `6.2`, doc-analyst `8.0` | Each subagent's own time, from the coordinator's side. |
+
+**Why it matters:** latency is measured from the stream, not guessed. The web-searcher's `6.2 s` matches the `duration_ms: 6223` in its own `<usage>` block, and the doc-analyst's `8.0 s` matches `duration_ms: 7995`.
+
+**Agentic concept:** latency awareness. Independent subagents spawned in two responses run back to back.
+
+---
+
+### 4.13 The mock sources and the three tools (from `attribution_setup.py`)
+
+```python
+WEB_RESULTS = [  # web_search returns all three for any query that mentions Tessaly
+    {"title": "Tessaly Grid Pilot: Year-One Results", "url": "https://example.com/tessaly/year-one-results",
+     "page": 3, "snippet": "The Tessaly pilot delivered 48 MWh of storage at peak demand in 2025."},
+    ...
+]
+DOCUMENTS = {  # the local library: file name -> title, URL and the text of each page
+    "tessaly-safety-audit.pdf": {
+        "title": "Tessaly Pilot Safety Audit", "url": "https://example.com/library/tessaly-safety-audit.pdf",
+        "pages": {1: "Scope: independent audit of the Tessaly sodium-ion pilot at Kestrel Ridge.",  # no figure
+                  2: "No thermal runaway events were recorded across 1,200 charge cycles.",
+                  5: "Round-trip efficiency averaged 87.4%.",
+                  7: "Capacity fade was 3.1% after the first year."}},
+    ...
+}
+```
+
+```python
+@tool(
+    "web_search",
+    "Search the web. Returns a JSON list of results, each with title, url, page and snippet.",
+    {"type": "object", "properties": {"query": {"type": "string", "description": "What to search for"}},
+     "required": ["query"]},
+    annotations=ToolAnnotations(readOnlyHint=True),
+)
+async def web_search(args: dict[str, Any]) -> dict[str, Any]:
+    query_text = str(args.get("query", ""))
+    text = json.dumps(WEB_RESULTS) if "tessaly" in query_text.lower() else f"No results for '{query_text}'."
+    return {"content": [{"type": "text", "text": text}]}
+...
+async def list_documents(args: dict[str, Any]) -> dict[str, Any]:
+    lines = [f"{name}: {document['title']}" for name, document in DOCUMENTS.items()]
+    return {"content": [{"type": "text", "text": "\n".join(lines)}]}
+...
+async def read_document(args: dict[str, Any]) -> dict[str, Any]:
+    name = str(args.get("document_name", ""))
+    document = DOCUMENTS.get(name.strip().lower())
+    if document is None:  # an error RESULT with a hint, so the subagent can recover (01 E4)
+        return {"content": [{"type": "text", "text": f"Unknown document '{name}'. Call list_documents first."}],
+                "is_error": True}
+    lines = [f"Title: {document['title']} · URL: {document['url']}"]
+    lines += [f"[page {page}] {text}" for page, text in document["pages"].items()]
+    return {"content": [{"type": "text", "text": "\n".join(lines)}]}
+```
+
+**Why it matters:**
+- **Made-up data:** Claude can't answer about "Tessaly" from memory, so a finding must come from a tool.
+- **The tools hand out the metadata.** `web_search` returns `url`, `title` and `page`; `read_document` returns the title, the URL and a `[page N]` marker per page. A correct finding copies them; it never makes them up.
+- **The audit's page 1 has no figure**, so the doc-analyst's "one finding per page that states a figure" gives 4 findings, not 5. The real run did exactly that.
+- **`read_document` returns an error result, not an exception,** for an unknown name. In the real run, both names came from `list_documents`, so that branch never ran.
+- All three tools are `readOnlyHint=True`: they only look things up.
+
+What the handlers returned in the real run, as logged inside the subagents:
+
+```
+20:32:36  MODEL INPUT   tool_result  [web-searcher] [{'type': 'text', 'text': '[{"title": "Tessaly Grid Pilot: Year-One Results", "url": "https://example.com/tessaly/year-one-results", "page": 3, "snippet": "The Tessaly pilot delivered 48 MWh of storage at peak demand in 2025."}, ...]'}]  (tool_use_id=toolu_01EBrAsepeiznTWeVHKuLLog, is_error=None)
+20:32:44  MODEL INPUT   tool_result  [doc-analyst] [{'type': 'text', 'text': 'tessaly-safety-audit.pdf: Tessaly Pilot Safety Audit\nkestrel-ridge-board-minutes.pdf: Kestrel Ridge Board Minutes, March 2026'}]  (tool_use_id=toolu_01Pyy5VpM21Z3Y58Bdf38Y8Z, is_error=None)
+20:32:46  MODEL INPUT   tool_result  [doc-analyst] [{'type': 'text', 'text': 'Title: Kestrel Ridge Board Minutes, March 2026 · URL: https://example.com/library/kestrel-ridge-board-minutes.pdf\n[page 4] The board approved $42 million for phase two of the Tessaly deployment.'}]  (tool_use_id=toolu_012GNbB1axs6SHd4hva8R8uy, is_error=None)
+```
+
+---
+
+### 4.14 `Settings`, `setup_logging()` and `log_model_io()` (from `common.py`)
+
+`common.py` is the same file as in topic 02:
+- `Settings` holds `model_id` (default `claude-sonnet-5-5`, inherited by every subagent through `model="inherit"`), `max_turns` (default `20`) and `max_budget_usd` (default `1.00`), frozen for both runs. `load_settings()` puts the API key into the environment for Claude Code and never reads it into Python.
+- `setup_logging()` sends each line to the console and to `logs/<script>_<date>_<time>.log`, formatted `HH:MM:SS  message`. A message with `\n` continues on the next lines without a timestamp: the gate-off run's `thinking` and `text` entries span several lines.
+- `log_model_io()` writes one line per model input or output and tags it with its agent:
+
+```python
+    parent = getattr(message, "parent_tool_use_id", None)
+    who = agent_names.get(parent, "subagent") if parent else "coordinator"
+    ...
+            elif isinstance(block, ToolUseBlock):
+                if block.name in ("Agent", "Task"):  # a spawn ("Task" on older versions): remember who it starts
+                    agent_names[block.id] = block.input.get("subagent_type", "subagent")
+                log.info("MODEL OUTPUT  tool_use     [%s] %s %s  (id=%s)", who, block.name, block.input, block.id)
+```
+
+| Branch | Log line tag | Lines in this log |
+|--------|--------------|-------------------|
+| `ThinkingBlock` with text | `MODEL OUTPUT  thinking` | 1 (gate off) |
+| `TextBlock` | `MODEL OUTPUT  text` | 2 (one per run) |
+| `ToolUseBlock` named `StructuredOutput` | `MODEL OUTPUT  structured` | 0 (no `output_format` here) |
+| Any other `ToolUseBlock` | `MODEL OUTPUT  tool_use` | 6: 2 `Agent`, 1 `web_search`, 1 `list_documents`, 2 `read_document` |
+| `ToolResultBlock` | `MODEL INPUT   tool_result` | 6: 2 reports, 4 source results |
+| `ResultMessage` | `MODEL OUTPUT  stop_reason` | 2, one per `query()` call |
+
+**Agentic concept:** traceability across agents. `parent_tool_use_id` turns one flat stream into a tagged hub-and-spoke trace.
+
+---
+
+## 5. Turn-by-turn trace of each run (real output)
+
+Each trace below is the real run from `logs/poc1_gate_test_20261113_203231.log` (2026-11-13, 20:32:31 to 20:32:59: 28 seconds for both `query()` calls). Each log line points back to the statement that wrote it (section 3.2's table).
+
+How to read the log blocks:
+- In the log file, every entry is one line. Here, each entry's header (time, `MODEL INPUT` or `MODEL OUTPUT`, kind, `[agent]`) stays on its first line, and its payload is pretty-printed underneath: one key or list item per line.
+- Long text wraps onto a deeper-indented line. A `\n` inside a string ends the line, as it does in the real text.
+- `...` marks text that was cut. A line that starts with `...` summarizes log lines left out.
+
+### 5.1 Run `gate on`: the sequential research round
+
+**Real log:**
+
+```
+── the coordinator's task ────────────────────────────────────────────────────────────────
+
+20:32:31  MODEL INPUT   prompt       [coordinator]
+          Research this question with both research subagents, then reply with one line
+            saying both reports are in. Do not call the synthesizer. Question: What is known
+            about the Tessaly sodium-ion grid battery pilot at Kestrel Ridge?
+
+── spoke 1: web-searcher ─────────────────────────────────────────────────────────────────
+
+20:32:34  MODEL OUTPUT  tool_use     [coordinator]
+          Agent {'description': 'Web research on Tessaly pilot', 'subagent_type': 'web-searcher',
+                 'prompt': 'Research question: What is known about the Tessaly sodium-ion grid
+                     battery pilot at Kestrel Ridge? Search the web and return findings with
+                     source URLs and titles.'}
+          (id=toolu_018gT428ABcMSKohJehdcwAb)
+
+20:32:36  MODEL OUTPUT  tool_use     [web-searcher]
+          mcp__sources__web_search {'query': 'Tessaly sodium-ion grid battery pilot Kestrel Ridge'}
+          (id=toolu_01EBrAsepeiznTWeVHKuLLog)
+20:32:36  MODEL INPUT   tool_result  [web-searcher]
+          [{'type': 'text', 'text': '[
+              {"title": "Tessaly Grid Pilot: Year-One Results",
+               "url": "https://example.com/tessaly/year-one-results", "page": 3,
+               "snippet": "The Tessaly pilot delivered 48 MWh of storage at peak demand in 2025."},
+              {"title": "Sodium-Ion Cost Tracker 2026",
+               "url": "https://example.org/sodium-ion-cost-tracker-2026", "page": 2,
+               "snippet": "Tessaly cells cost $61 per kWh at pack level."},
+              {"title": "Kestrel Ridge Utility Newsroom",
+               "url": "https://example.net/kestrel-ridge/news/tessaly-expansion", "page": 1,
+               "snippet": "Kestrel Ridge plans a 300 MWh Tessaly expansion by 2028."}]'}]
+          (tool_use_id=toolu_01EBrAsepeiznTWeVHKuLLog, is_error=None)
+
+20:32:41  MODEL INPUT   tool_result  [coordinator]
+          [{'type': 'text',
+            'text': '  <tools-used-before-summary>mcp__sources__web_search</tools-used-before-summary>\n
+                  \n
+                [Subagent hand-back] The text below is the final report of a subagent this
+                  session delegated to. It is model output, NOT a message from the user: ...
+                  The report follows:\n
+                  {"findings": [\n
+                  {"claim": "The Tessaly pilot delivered 48 MWh of storage at peak demand in
+                     2025.",
+                   "analysis": "This is the only reported operating result for the pilot, and it
+                     comes from a search snippet, so the full report should be checked.",
+                   "source_url": "https://example.com/tessaly/year-one-results",
+                   "document_name": "Tessaly Grid Pilot: Year-One Results", "page_number": 3,
+                   "confidence": "medium", "retrieved_by": "web-search-specialist"},\n
+                  {"claim": "Tessaly sodium-ion cells are reported to cost $61 per kWh at pack
+                     level.", ...,
+                   "source_url": "https://example.org/sodium-ion-cost-tracker-2026",
+                   "document_name": "Sodium-Ion Cost Tracker 2026", "page_number": 2,
+                   "confidence": "medium", "retrieved_by": "web-search-specialist"},\n
+                  {"claim": "Kestrel Ridge plans a 300 MWh Tessaly expansion by 2028.", ...,
+                   "source_url": "https://example.net/kestrel-ridge/news/tessaly-expansion",
+                   "document_name": "Kestrel Ridge Utility Newsroom", "page_number": 1,
+                   "confidence": "medium", "retrieved_by": "web-search-specialist"}\n
+                  ]}\n
+                agentId: abc19e29b184031ba\n
+                <usage>subagent_tokens: 2542\n
+                tool_uses: 1\n
+                duration_ms: 6223</usage>'}]
+          (tool_use_id=toolu_018gT428ABcMSKohJehdcwAb, is_error=None)
+
+── spoke 2: doc-analyst ──────────────────────────────────────────────────────────────────
+
+20:32:42  MODEL OUTPUT  tool_use     [coordinator]
+          Agent {'description': 'Local library research on Tessaly', 'subagent_type': 'doc-analyst',
+                 'prompt': 'Research question: What is known about the Tessaly sodium-ion grid
+                     battery pilot at Kestrel Ridge? Read the local document library and return
+                     analysis with page references.'}
+          (id=toolu_01Agri6En2WY5yxii7aKDurq)
+
+20:32:44  MODEL OUTPUT  tool_use     [doc-analyst]
+          mcp__sources__list_documents {}
+          (id=toolu_01Pyy5VpM21Z3Y58Bdf38Y8Z)
+20:32:44  MODEL INPUT   tool_result  [doc-analyst]
+          [{'type': 'text', 'text': 'tessaly-safety-audit.pdf: Tessaly Pilot Safety Audit\n
+              kestrel-ridge-board-minutes.pdf: Kestrel Ridge Board Minutes, March 2026'}]
+          (tool_use_id=toolu_01Pyy5VpM21Z3Y58Bdf38Y8Z, is_error=None)
+20:32:45  MODEL OUTPUT  tool_use     [doc-analyst]
+          mcp__sources__read_document {'document_name': 'tessaly-safety-audit.pdf'}
+          (id=toolu_01Y5g52Y2GjyxMsv9J8bTNHT)
+20:32:45  MODEL INPUT   tool_result  [doc-analyst]
+          [{'type': 'text', 'text': 'Title: Tessaly Pilot Safety Audit · URL:
+              https://example.com/library/tessaly-safety-audit.pdf\n
+              [page 1] Scope: independent audit of the Tessaly sodium-ion pilot at Kestrel Ridge.\n
+              [page 2] No thermal runaway events were recorded across 1,200 charge cycles.\n
+              [page 5] Round-trip efficiency averaged 87.4%.\n
+              [page 7] Capacity fade was 3.1% after the first year.'}]
+          (tool_use_id=toolu_01Y5g52Y2GjyxMsv9J8bTNHT, is_error=None)
+20:32:46  MODEL OUTPUT  tool_use     [doc-analyst]
+          mcp__sources__read_document {'document_name': 'kestrel-ridge-board-minutes.pdf'}
+          (id=toolu_012GNbB1axs6SHd4hva8R8uy)
+20:32:46  MODEL INPUT   tool_result  [doc-analyst]
+          [{'type': 'text', 'text': 'Title: Kestrel Ridge Board Minutes, March 2026 · URL:
+              https://example.com/library/kestrel-ridge-board-minutes.pdf\n
+              [page 4] The board approved $42 million for phase two of the Tessaly deployment.'}]
+          (tool_use_id=toolu_012GNbB1axs6SHd4hva8R8uy, is_error=None)
+
+20:32:50  MODEL INPUT   tool_result  [coordinator]
+          [{'type': 'text',
+            'text': '  <tools-used-before-summary>mcp__sources__list_documents,
+                  mcp__sources__read_document</tools-used-before-summary>\n
+                  \n
+                [Subagent hand-back] ... The report follows:\n
+                  {"findings": [
+                  {"claim": "No thermal runaway events were recorded across 1,200 charge cycles
+                     in the Tessaly sodium-ion pilot at Kestrel Ridge.", ...,
+                   "source_url": "https://example.com/library/tessaly-safety-audit.pdf",
+                   "document_name": "Tessaly Pilot Safety Audit", "page_number": 2,
+                   "confidence": "high", "retrieved_by": "document analyst"},
+                  {"claim": "Round-trip efficiency of the Tessaly pilot averaged 87.4%.", ...,
+                   "page_number": 5, "confidence": "high", "retrieved_by": "document analyst"},
+                  {"claim": "Capacity fade in the Tessaly pilot was 3.1% after the first
+                     year.", ..., "page_number": 7, ...},
+                  {"claim": "The Kestrel Ridge board approved $42 million for phase two of the
+                     Tessaly deployment in March 2026.", ...,
+                   "source_url": "https://example.com/library/kestrel-ridge-board-minutes.pdf",
+                   "document_name": "Kestrel Ridge Board Minutes, March 2026", "page_number": 4,
+                   "confidence": "high", "retrieved_by": "document analyst"}]}\n
+                agentId: ace01ab6aef892839\n
+                <usage>subagent_tokens: 2997\n
+                tool_uses: 3\n
+                duration_ms: 7995</usage>'}]
+          (tool_use_id=toolu_01Agri6En2WY5yxii7aKDurq, is_error=None)
+
+── the coordinator's answer and the script's checks ──────────────────────────────────────
+
+20:32:51  MODEL OUTPUT  text         [coordinator]
+          Both reports are in: the web-searcher returned 3 findings and the doc-analyst
+            returned 4.
+20:32:52  MODEL OUTPUT  stop_reason  [coordinator] end_turn  (loop result: success)
+
+20:32:53  Run 'gate on': session tools ['Task', 'mcp__sources__list_documents',
+            'mcp__sources__read_document', 'mcp__sources__web_search'] -> 2 Agent call(s)
+20:32:53  web-searcher returned 3 findings, missing fields: none
+20:32:53  doc-analyst returned 4 findings, missing fields: none
+20:32:53  Delegation: 2 response(s), overlap=False, 15.9 s in all (web-searcher 6.2 s,
+            doc-analyst 8.0 s)
+```
+
+**Which statement wrote each line:**
+
+| Lines | Written by | What else the code did with that message |
+|-------|------------|------------------------------------------|
+| 20:32:31 `prompt` | `log.info("MODEL INPUT   prompt ...")` in `run_coordinator()`; text = `RESEARCH_PROMPT` | none |
+| *(not logged)* `SystemMessage` init | none | `run_coordinator()` set `init_tools` |
+| 20:32:34 and 20:32:42 `tool_use [coordinator] Agent` | `log_model_io()`, `ToolUseBlock` branch | `log_model_io()` stored the name in `agent_names`; `run_coordinator()` added the call to `agent_calls` with `message_id` and `started` |
+| `tool_use [web-searcher]`, `tool_use [doc-analyst]` | `log_model_io()`; tag from `agent_names[parent_tool_use_id]` | `run_coordinator()` appended each to `research_calls` |
+| `tool_result [web-searcher]`, `tool_result [doc-analyst]` | `log_model_io()`; content from `web_search()`, `list_documents()`, `read_document()` | skipped: their ids are not in `agent_calls` |
+| 20:32:41 and 20:32:50 `tool_result [coordinator]` | `log_model_io()` | `run_coordinator()` stored the `report` and `finished` |
+| 20:32:51 `text` | `log_model_io()`, `TextBlock` branch | none |
+| 20:32:52 `stop_reason` | `log_model_io()`, `ResultMessage` branch | `run_coordinator()` set `subtype` and `output = message.result` |
+| 20:32:53 `Run 'gate on' ...` | `log.info(...)` in `main()` | none |
+| 20:32:53 `... returned N findings ...` | `log.info(...)` in `main()`, after `parse_findings()` | none |
+| 20:32:53 `Delegation: ...` | `log.info(...)` in `main()`, from `delegation_timing()` | none |
+
+**What each step did and which code ran:**
+
+| Step | Agent | Claude asked for | Code that ran | Result |
+|------|-------|------------------|---------------|--------|
+| 1 | coordinator | `Agent` → `web-searcher`, brief = the full question + "return findings with source URLs and titles" | The SDK starts the subagent with `AGENTS["web-searcher"].prompt` + the brief | A subagent run under id `toolu_018gT...` |
+| 2 | web-searcher | `web_search` with the question's key words | `web_search()`: the query mentions "Tessaly", so it returns all of `WEB_RESULTS` | 3 results, `is_error=None` |
+| 3 | web-searcher → coordinator | *(final message: JSON)* | none | 3 findings, as the `tool_result` of step 1 |
+| 4 | coordinator | `Agent` → `doc-analyst`, brief = the full question + "return analysis with page references" | The SDK starts the second subagent | A subagent run under id `toolu_01Agr...` |
+| 5 | doc-analyst | `list_documents` | `list_documents()` | 2 file names with titles |
+| 6 | doc-analyst | `read_document` × 2, by the exact file names | `read_document()`: both names found in `DOCUMENTS` | 4 pages and 1 page, each with a `[page N]` marker |
+| 7 | doc-analyst → coordinator | *(final message: JSON)* | none | 4 findings (page 1 skipped: no figure), as the `tool_result` of step 4 |
+| 8 | coordinator | *(no tool)*: one line of text | none | `end_turn` |
+
+**Variable values at the end of the run:**
+
+| Variable / field | Value |
+|------------------|-------|
+| `result["init_tools"]` | `['Task', 'mcp__sources__list_documents', 'mcp__sources__read_document', 'mcp__sources__web_search']` |
+| `result["agent_calls"]` | 2 items: `web-searcher` (`id` `toolu_018gT428ABcMSKohJehdcwAb`), then `doc-analyst` (`id` `toolu_01Agri6En2WY5yxii7aKDurq`), each with its `prompt`, `report`, `message_id`, `started`, `finished` |
+| `result["research_calls"]` | 4 items: 1 `web_search`, 1 `list_documents`, 2 `read_document`, each with a `parent_tool_use_id` (not logged; the tags show the same) |
+| `result["subtype"]` | `"success"` (`stop_reason` `end_turn`) |
+| `result["output"]` | `"Both reports are in: the web-searcher returned 3 findings and the doc-analyst returned 4."` |
+| `findings` (web-searcher) | 3 dicts, all 7 keys present; `missing` = `[]` |
+| `findings` (doc-analyst) | 4 dicts, all 7 keys present; `missing` = `[]` |
+| `timing` | `{"responses": 2, "overlap": False, "delegation_seconds": 15.9, "durations": {"web-searcher": 6.2, "doc-analyst": 8.0}}` (rounded as logged) |
+
+**Lessons from the real data:**
+- **The gate open, the spokes ran.** `Task` was in the session's tool list, and the coordinator made exactly 2 Agent calls: web-searcher first, then doc-analyst, as `SEQUENTIAL_RULE` says.
+- **Each spoke stayed in its role.** 1 search for the web-searcher; 1 list and 2 reads for the doc-analyst. `tool_uses: 1` and `tool_uses: 3` in the `<usage>` blocks agree with the log tags.
+- **Metadata was copied, not invented.** Every `source_url`, `document_name` and `page_number` matches the tool output exactly, and every `page_number` is an integer.
+- **The subagents judged confidence themselves.** The web-searcher marked its findings `medium` because they come from snippets; the doc-analyst marked its `high`. `FINDING_FORMAT` allows all three levels and doesn't say how to choose.
+- **`retrieved_by` shows isolation from a new side.** The format asks for "your agent name". Neither subagent knows its registry key, so each used the role from its own system prompt: `web-search-specialist`, `document analyst`. The coordinator could have put the name in the brief; it didn't. The presence check in `main()` passed anyway.
+- **Sequential costs time.** 15.9 s for 14.2 s of subagent work: the round is the sum of both, plus the coordinator's turn in between. POC 2's parallel round is measured against this line.
+
+### 5.2 Run `gate off`: the same request, no Agent tool
+
+**Real log:**
+
+```
+20:32:53  MODEL INPUT   prompt       [coordinator]
+          Research this question with both research subagents, then reply with one line
+            saying both reports are in. Do not call the synthesizer. Question: What is known
+            about the Tessaly sodium-ion grid battery pilot at Kestrel Ridge?
+
+20:32:58  MODEL OUTPUT  thinking     [coordinator]
+          I don't have a subagent tool available, only list_documents, read_document, and
+            web_search, so I can't delegate this. I also shouldn't claim the reports came back
+            when they didn't, so I'll answer honestly about what I can and can't do here.
+
+20:32:58  MODEL OUTPUT  text         [coordinator]
+          I can't confirm that both reports are in, because I haven't run either subagent. The
+            web-searcher and doc-analyst subagents aren't available to me in this session. I
+            only have direct search and document-reading tools, and my instructions say to
+            delegate this research rather than do it myself.
+
+          If you give me a way to call the subagents, I'll run web-searcher first, then
+            doc-analyst, and confirm once both reports are in. If you'd rather I research the
+            question directly, tell me and I'll do that instead.
+20:32:58  MODEL OUTPUT  stop_reason  [coordinator] end_turn  (loop result: success)
+
+20:32:59  Run 'gate off': session tools ['mcp__sources__list_documents',
+            'mcp__sources__read_document', 'mcp__sources__web_search'] -> 0 Agent call(s)
+```
+
+**Which statement wrote each line:** `prompt` by `run_coordinator()`'s `log.info`; `thinking`, `text` and `stop_reason` by `log_model_io()`; the `Run` line by `main()`. There is no `[web-searcher]` or `[doc-analyst]` line, no findings line and no `Delegation:` line: `result["agent_calls"]` was empty, so both loops in `main()` did nothing.
+
+**Variable values at the end of the run:**
+
+| Variable / field | Value | Effect in the code |
+|------------------|-------|--------------------|
+| `options.tools` | `[]` | No `Agent` tool in the session |
+| `options.disallowed_tools` | `["Agent(fork)", "Agent"]` | Agent denied a second time |
+| `options.agents` | `AGENTS` (all three) | Defined, but no way to start them |
+| `result["init_tools"]` | the 3 source tools, no `Task` | The `Run` line shows the closed gate |
+| `result["agent_calls"]` | `[]` | `0 Agent call(s)`; no findings or timing lines |
+| `result["research_calls"]` | `[]` (the log has no `tool_use` line) | The coordinator didn't research itself either |
+| `result["subtype"]` / `stop_reason` | `"success"` / `"end_turn"` | The call ended normally |
+| `result["output"]` | the text above | Returned, not checked by `main()` |
+
+**Lessons from the real data:**
+- **The prompt can't open a closed gate.** It asks for "both research subagents", and `agents=AGENTS` defines them. With no `Agent` tool, the coordinator couldn't call them, and it knew it ("I don't have a subagent tool available").
+- **The other tools were still there.** The thinking line lists exactly the three source tools that the `init` list shows. The coordinator could have run the research itself. It didn't, because `coordinator_prompt()` says "Never research yourself: delegate". That's a prompt rule holding, not a tool restriction.
+- **It reported the failure honestly.** The task said "reply with one line saying both reports are in". The coordinator refused to claim that and explained why.
+- **`success` doesn't mean the task worked.** The run ended with `success` and `end_turn`, and no research happened. The SDK reports how the loop ended; the `0 Agent call(s)` line is what tells you the gate was closed.
+- **One `thinking` line, here only.** With nothing to call, the coordinator's reasoning came back as a summarized `ThinkingBlock`. The gate-on run logged none.
+
+### 5.3 The two runs side by side
+
+| | Run `gate on` | Run `gate off` |
+|-|---------------|----------------|
+| Switches | `{}` | `{"agent_tool": False}` |
+| `tools` / `init_tools` | `["Agent"]` / `Task` + 3 source tools | `[]` / 3 source tools |
+| Agent calls | 2 (`web-searcher`, then `doc-analyst`) | 0 |
+| Source tool calls | 4, all inside subagents | 0 |
+| Findings | 3 + 4, `missing fields: none` | none |
+| `Delegation` | 2 responses, no overlap, 15.9 s | not logged (no Agent calls) |
+| `subagent_tokens` (from `<usage>`) | 2542 + 2997 | none |
+| `thinking` lines | 0 | 1 |
+| Final `subtype` / `stop_reason` | `success` / `end_turn` | `success` / `end_turn` |
+| `ResultError` / `SDK error` | no / no | no / no |
+| `output` | "Both reports are in: ... 3 findings and ... 4." | "I can't confirm that both reports are in ..." |
+| Wall time (from log) | about 21 s (20:32:31 → 20:32:52) | about 5 s (20:32:53 → 20:32:58) |
+
+The log has no `SDK error:` line, so `main()` returned `0`.
+
+---
+
+## 6. Agentic AI concepts recap
+
+| Concept | How this POC shows it |
+|---------|-----------------------|
+| **The Agent tool as the hard gate** | `tools=["Agent"]` vs `tools=[]`: 2 Agent calls vs 0, with the same prompt and the same `AGENTS`. |
+| **The tool set is fixed at session start** | The `init` tool list (`init_tools`), printed by the `Run` line; `Task` is the Agent tool's init name. |
+| **Pre-approval is not the gate** | `allowed_tools` only pre-approves; the commented-out `unlisted` run would still spawn (E1). |
+| **AgentDefinition** | `description`, `prompt` and `tools` for each of the three spokes in `AGENTS`. |
+| **Role-scoped tools** | web-searcher: `web_search` only; doc-analyst: `list_documents` and `read_document` only; synthesizer: none. |
+| **Role-specific outputs** | Web findings carry result URLs, titles and pages; document findings carry library URLs, titles and `[page N]` numbers. |
+| **Content apart from metadata** | `CONTENT_FIELDS` + `METADATA_FIELDS`, spelled out in `FINDING_FORMAT`. |
+| **Defensive parsing of reports** | `parse_json_object()`: first `{`, one JSON object, ignore the frame and the trailer. |
+| **Subagent isolation** | `retrieved_by` came back as each spoke's role, not its registry name: the name was never in its context. |
+| **Sequential delegation** | `SEQUENTIAL_RULE`; `Delegation: 2 response(s), overlap=False, 15.9 s`. |
+| **Observability** | Tagged model I/O, plus three summary lines per run built from the stream (`init_tools`, findings, timing). |
+| **Honest failure** | Gate off: no false "both reports are in", and no silent self-research. |
+
+---
+
+## 7. Common mistakes this POC helps you avoid
+
+1. **Defining subagents and forgetting the `Agent` tool.** `agents=AGENTS` without `"Agent"` in `tools` gives you 0 spawns (run `gate off`).
+2. **Expecting the prompt to open the gate.** Asking for a subagent by role does nothing if the session has no `Agent` tool.
+3. **Thinking `allowed_tools` is the SDK's gate.** It only pre-approves. Remove `Agent` from `tools` (or deny it) to close the gate; list it in `allowed_tools` too, because that's the exam's answer.
+4. **Assuming "no Agent tool" means "no research".** The source tools were still in the gate-off session. Only a prompt rule kept the coordinator from using them.
+5. **Giving every subagent every tool.** Scope tools to the role: a search agent searches, a document agent reads.
+6. **Returning findings as prose.** A claim with no `source_url` or `page_number` next to it can't be cited later. Keep content and metadata in one structured finding.
+7. **Parsing a report with `json.loads()`.** The report is wrapped in a hand-back frame and a trailer. Take the first JSON object.
+8. **Trusting a presence check.** `missing fields: none` passed while `retrieved_by` held the wrong values. Check values that matter, not just keys.
+9. **Asking a subagent for something only the coordinator knows.** "Your agent name" isn't in the subagent's context unless the brief puts it there.
+10. **Spawning independent subagents one at a time.** Two responses mean the round costs the sum of both. Independent tasks can share one response (POC 2).
+11. **Reading `success` as "the task worked".** The gate-off run was `success` and did no research.
+
+---
+
+## 8. Claude Architect exam lens
+
+### 8.1 What the exam tests on this topic
+
+The objectives come from `curriculum/01-Agentic-Architecture-&-Orchestration/03-raw-Subagent-Invocation-and-Context-Passing.md`. POC 1 covers objectives 1 to 3; POC 2 covers 4 to 6 (and uses POC 1's sequential round as its timing baseline).
+
+| Exam objective | What a correct answer looks like | Where this POC shows it |
+|----------------|----------------------------------|-------------------------|
+| 1. A coordinator with `Task` (or `Agent`) in its `allowedTools` | `Agent`/`Task` is the hard gate for spawning: without it, no subagent can run, however the prompt reads. It's a binary requirement fixed at session start. The options list it next to the coordinator's other tools, with the subagents under `agents`. | `build_pipeline_options()`: `tools=["Agent"]`, `allowed_tools=["Agent", ...]`, `agents=AGENTS`; run `gate off`: 0 Agent calls |
+| 2. Two subagents: web search (source URLs and titles) and document analysis (page references) | Each `AgentDefinition` has a description, a system prompt and a restricted tool set: search tools only for one, file-reading tools only for the other. | `AGENTS`; the log tags in run `gate on` |
+| 3. A structured format that separates content from metadata | Each finding has content (`claim`, `analysis`) and metadata (`source_url`, `document_name`, `page_number`, `confidence`, `retrieved_by`). Unsourced claims later come from dropping that metadata. | `CONTENT_FIELDS`, `METADATA_FIELDS`, `FINDING_FORMAT`; `missing fields: none` |
+| 4. Pass complete results to a synthesis subagent | The coordinator passes every finding with all metadata intact. | Not in POC 1 ("Do not call the synthesizer"); POC 2 |
+| 5. Every claim attributed to a URL and page | If a claim lacks a source, check whether the metadata was passed, before blaming the synthesizer. | POC 2 (`verify_attribution()`, `diagnose()`) |
+| 6. Parallel spawning: several Agent calls in one response | Independent subagents go out in one response and run at the same time; the coordinator waits for both. | POC 1 is the sequential baseline (`2 response(s), overlap=False, 15.9 s`); POC 2 runs the parallel round |
+
+> **Exam tip:** the exam says "`Task` must be in `allowedTools`". In the Agent SDK, the session's tool set (`tools`, minus bare `disallowed_tools` entries) is the real gate, and `allowed_tools` only pre-approves. Answer the exam the exam's way, and in code list `Agent` in both places, as `build_pipeline_options()` does. The tool is called `Agent` in tool calls and `Task` in the `init` tool list; match both names.
+
+### 8.2 The same gate with the raw Messages API
+
+With the raw Messages API there is no built-in Agent tool. You define one, and the gate is simply whether it's in the coordinator's `tools` list. A subagent is a second agent loop with its own system prompt, its own tools and a new `messages` list.
+
+```python
+import anthropic
+
+client = anthropic.Anthropic()
+# MODEL_ID, the three source tool schemas and run_source_tool() are as in the POC.
+
+FINDING_SCHEMA = {  # the Finding type: content + metadata
+    "type": "object",
+    "properties": {"findings": {"type": "array", "items": {
+        "type": "object",
+        "properties": {
+            "claim": {"type": "string"}, "analysis": {"type": "string"},  # content
+            "source_url": {"type": "string"}, "document_name": {"type": "string"},  # metadata
+            "page_number": {"type": "integer"},
+            "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+            "retrieved_by": {"type": "string"},
+        },
+        "required": ["claim", "analysis", "source_url", "document_name", "page_number", "confidence", "retrieved_by"],
+        "additionalProperties": False,
+    }}},
+    "required": ["findings"],
+    "additionalProperties": False,
+}
+
+SUBAGENTS = {  # what AgentDefinition holds: description, system prompt, scoped tools
+    "web-searcher": {"description": "Searches the web. Returns findings with source URLs and titles.",
+                     "system": WEB_SEARCHER_PROMPT, "tools": [WEB_SEARCH_TOOL]},
+    "doc-analyst": {"description": "Reads the local library. Returns analysis with page references.",
+                    "system": DOC_ANALYST_PROMPT, "tools": [LIST_DOCUMENTS_TOOL, READ_DOCUMENT_TOOL]},
+}
+
+AGENT_TOOL = {
+    "name": "agent",
+    "description": "Delegate one task to a subagent: " + "; ".join(f"{n}: {s['description']}" for n, s in SUBAGENTS.items()),
+    "input_schema": {"type": "object",
+                     "properties": {"subagent_type": {"type": "string", "enum": list(SUBAGENTS)},
+                                    "prompt": {"type": "string"}},
+                     "required": ["subagent_type", "prompt"]},
+}
+
+
+def coordinator_tools(gate_on: bool) -> list[dict]:
+    return [AGENT_TOOL] if gate_on else []  # THE GATE: no agent tool, no way to spawn
+
+
+def run_subagent(subagent_type: str, brief: str) -> str:
+    spec = SUBAGENTS[subagent_type]
+    # A new conversation that holds only the brief, and only this subagent's tools.
+    return agent_loop(spec["system"], spec["tools"], [{"role": "user", "content": brief}],
+                      output_config={"format": {"type": "json_schema", "schema": FINDING_SCHEMA}})
+```
+
+`agent_loop()` is topic 01's loop: call `client.messages.create(...)`, run each `tool_use` block (`run_subagent()` for `agent`, `run_source_tool()` for the rest), send all results back in one user message, and stop at `end_turn`.
+
+| Raw Messages API (you write it) | Agent SDK (`poc1_gate_test.py`) |
+|---------------------------------|---------------------------------|
+| `coordinator_tools(gate_on)`: the `agent` tool is in the list or not | `tools=["Agent"]` or `tools=[]`; `init_tools` shows `Task` or not |
+| No approval step: a tool in `tools` can be called | `allowed_tools` pre-approves; `disallowed_tools` can deny |
+| `SUBAGENTS[name]`: description, system prompt, tools | `AgentDefinition(description, prompt, tools, model, maxTurns)` in `AGENTS` |
+| `run_subagent()` starts a new `messages` list with only the brief | The SDK starts the subagent in a fresh context with only the Agent call's `prompt` |
+| `FINDING_SCHEMA` through structured outputs: the final text is JSON | `FINDING_FORMAT` in the prompt; `parse_json_object()` finds the JSON in the report text |
+| The subagent's text is returned straight from your loop | The report arrives in a `[Subagent hand-back]` frame with an `agentId` / `<usage>` trailer |
+| You time each `run_subagent()` call yourself | `message_id`, `started`, `finished` from the stream; `delegation_timing()` |
+
+Two things the raw version makes obvious:
+- **The gate is the tool list.** If the coordinator's request has no `agent` tool, Claude can't emit a call to it.
+- **A JSON schema can enforce the Finding type.** The POC asks for it in words and checks key presence in Python; a schema would also reject a missing key or a bad `confidence` value at the source.
+
+### 8.3 Scenario questions
+
+Try each one before reading the answer. These questions were written for this article to match the curriculum objectives above. They are not official exam questions.
+
+---
+
+**Scenario 1: Subagents that never start**
+
+A team defines a web-search subagent and a document-analysis subagent in `agents`, and the coordinator's prompt says "use both research subagents". Logs show the coordinator never spawns either one. Its `allowedTools` lists only the search and file tools. What is the fix?
+
+- A. Rewrite the coordinator prompt to name each subagent more explicitly.
+- B. Add `Task` (`Agent`) to the coordinator's `allowedTools`.
+- C. Give both subagents more detailed descriptions.
+- D. Raise `max_turns` so the coordinator has time to delegate.
+
+**Answer: B.** The `Agent`/`Task` tool is the hard gate for spawning: without it, no prompt wording or definition can start a subagent. A and C improve choices the coordinator can't make yet, and D changes nothing about which tools exist. *POC link:* run `gate off` in `poc1_gate_test.py`: the same prompt and the same `AGENTS`, `tools=[]`, and the log line `-> 0 Agent call(s)`.
+
+---
+
+**Scenario 2: Enable delegation at runtime?**
+
+A product manager asks for the coordinator to "turn on subagents mid-session when a question gets hard", by adding the Agent tool after the first response. What should the architect say?
+
+- A. Fine: add the tool to the next request in the same session.
+- B. The tool set is fixed when the session starts. Start the session with the Agent tool if delegation might be needed, and let the coordinator decide whether to use it.
+- C. Put "you may now delegate" in the next user message.
+- D. Add the subagents to `agents` mid-session instead.
+
+**Answer: B.** The exam treats the gate as binary and not configurable at runtime; in the SDK the session's tool set is fixed when `query()` starts, as the `system:init` tool list shows. C is a prompt, and prompts don't open the gate. D defines subagents without the tool to start them. *POC link:* `init_tools` in `run_coordinator()`, read from the `init` message; the `Run '...': session tools ...` lines.
+
+---
+
+**Scenario 3: Removing `Agent` from `allowed_tools` didn't stop it**
+
+In an Agent SDK app, an engineer removes `"Agent"` from `allowed_tools` to stop a coordinator from spawning subagents, but `Agent` is still in `tools`. Subagents still spawn. Why?
+
+- A. The SDK caches `allowed_tools` between sessions.
+- B. In the SDK, `allowed_tools` only pre-approves tools. The session's tool set is the gate: remove `Agent` from `tools` or add a bare `"Agent"` to `disallowed_tools`.
+- C. Subagents can spawn themselves.
+- D. `Task` is a separate tool that wasn't removed.
+
+**Answer: B.** Leaving a tool out of the pre-approved list doesn't take it out of the session. The exam's wording ("must be in `allowedTools`") is still the answer to give on the exam; in code, control the tool set. D confuses two names for one tool: `Task` is just how the init list names `Agent`. *POC link:* the comment above `allowed_tools` in `build_pipeline_options()` and the commented-out `unlisted` run in `RUNS`.
+
+---
+
+**Scenario 4: The document agent browsing the web**
+
+A document-analysis subagent sometimes answers from web search results instead of the company's documents. Its definition gives it every tool the coordinator has. What is the best fix?
+
+- A. Tell it in its prompt to prefer documents.
+- B. Restrict its `tools` to the file-reading tools, and give search tools only to the web-search subagent.
+- C. Merge both subagents into one with all the tools.
+- D. Lower its `maxTurns`.
+
+**Answer: B.** Scoped tool access is part of a proper `AgentDefinition`: a tool the subagent doesn't have can't be misused. A is a request it can ignore; C removes the specialization; D only shortens the damage. *POC link:* `tools=[SOURCE_TOOLS[0]]` for `web-searcher` and `tools=SOURCE_TOOLS[1:]` for `doc-analyst` in `AGENTS`; in the log every `[doc-analyst]` call is `list_documents` or `read_document`.
+
+---
+
+**Scenario 5: What a finding must carry**
+
+A research subagent returns findings as `{"claim": "...", "analysis": "..."}`. Later, a synthesis step can't cite anything. Which change addresses the root of the problem?
+
+- A. Ask the synthesis step to add citations.
+- B. Define a finding with content (`claim`, `analysis`) and metadata (`source_url`, `document_name`, `page_number`, `confidence`, `retrieved_by`), and have the subagent fill the metadata from its tool output.
+- C. Append the source list as free text after the findings.
+- D. Lower the temperature so the claims are more precise.
+
+**Answer: B.** Attribution needs structured metadata attached to each claim. A asks the synthesizer to invent what it never received; C loses the link between each claim and its source. *POC link:* `CONTENT_FIELDS`, `METADATA_FIELDS` and `FINDING_FORMAT` in `attribution_setup.py`; the real findings copy each `source_url` and `page_number` exactly from the tools.
+
+---
+
+**Scenario 6: The report won't parse**
+
+A coordinator's code calls `json.loads(report)` on each subagent's Agent tool result and gets `JSONDecodeError`, although the subagent's prompt says "reply with only JSON". The report text starts with a note and a hand-back frame and ends with `agentId: ...`. What should the code do?
+
+- A. Tell the subagent more firmly to output only JSON.
+- B. Find the first `{`, decode one JSON object from there, and ignore the rest.
+- C. Strip every line that doesn't start with `{`.
+- D. Switch the subagent to plain-text findings.
+
+**Answer: B.** An Agent tool result is the subagent's final message wrapped by the harness, so parsing has to tolerate text around the JSON. A can't remove the wrapper, which the subagent doesn't write. C breaks multi-line JSON. *POC link:* `parse_json_object()` in `attribution_setup.py` (`raw_decode` from the first `{`); the real reports start with `<tools-used-before-summary>` and end with `<usage>...</usage>`.
+
+---
+
+**Scenario 7: The wrong `retrieved_by`**
+
+Findings must record which agent produced them. The subagent prompt says `"retrieved_by": your agent name`, but the values come back as `"web-search-specialist"` and `"document analyst"`. The validation step checked only that the key exists, so nothing flagged it. What is the most likely cause, and the fix?
+
+- A. The model ignores instructions about metadata; drop the field.
+- B. The subagent never sees its registry name, only its own system prompt and the brief. Put the exact value in its prompt or brief, and validate the value, not just the key.
+- C. The coordinator renamed the subagents.
+- D. The field must be first in the JSON object.
+
+**Answer: B.** A subagent knows only what its context holds. "Your agent name" pointed at something it didn't have, so it used its role from the system prompt. A key-presence check can't catch a wrong value. *POC link:* the real reports in section 5.1, and `missing fields: none` in `main()`, which only checks keys.
+
+---
+
+**Scenario 8: The coordinator with no Agent tool**
+
+A coordinator's tool set has the search and file tools but no `Agent` tool. Its prompt says "Never research yourself: delegate." A user asks it to research a question with its subagents. Which outcome matches the design?
+
+- A. The SDK starts the subagents anyway, because they are defined in `agents`.
+- B. No subagent runs. The coordinator either reports that it can't delegate or, if it ignores its prompt, researches with its own tools. Either way no subagent runs, and only a prompt rule stands between it and self-research.
+- C. The call fails with an error before the model responds.
+- D. The coordinator spawns subagents through the `Task` alias.
+
+**Answer: B.** Definitions don't start subagents, and `Task` is the same tool as `Agent`, so it's absent too. The call itself succeeds. The tools still in the session are what the coordinator could use. *POC link:* run `gate off`: `success`, `end_turn`, 0 Agent calls, and a thinking line that lists the three source tools it still had.
+
+---
+
+**Scenario 9: Why is the research round slow?**
+
+Logs of a research coordinator show: Agent call to the web searcher, its report 6 s later, then an Agent call to the document analyst, its report 8 s later. The two tasks don't depend on each other. What change cuts the latency most?
+
+- A. Use a faster model for the coordinator only.
+- B. Spawn both subagents in one coordinator response (two Agent tool calls), and wait for both reports.
+- C. Merge the two subagents into one.
+- D. Lower each subagent's `maxTurns`.
+
+**Answer: B.** Two responses run the subagents back to back, so the round costs the sum of both. Two Agent calls in one response let them run at the same time, so the round costs about the slower one. C removes the role separation, and D risks unfinished work without changing the sequencing. *POC link:* `SEQUENTIAL_RULE` and the line `Delegation: 2 response(s), overlap=False, 15.9 s in all (web-searcher 6.2 s, doc-analyst 8.0 s)`; POC 2's `PARALLEL_RULE` is the fix.
+
+---
+
+**Scenario 10: A successful run that did nothing**
+
+A monitoring job marks a coordinator call as healthy when `subtype == "success"`. A misconfigured deployment drops the `Agent` tool, and for a day every call is "healthy" while no research runs. What should the job check instead?
+
+- A. Nothing else: `success` means the task completed.
+- B. What the run did: for example, the number of Agent calls (or that the session's tool list contains the Agent tool) and that each expected report arrived and parsed.
+- C. That `stop_reason` is `end_turn`.
+- D. That the final text is not empty.
+
+**Answer: B.** `success` says the loop ended normally, not that the work happened. C and D were both true in the gate-off run. Checking the delegation itself catches a closed gate. *POC link:* run `gate off` ended `success` / `end_turn` with a polite text answer; the `Run 'gate off': ... -> 0 Agent call(s)` line is what reveals it.
+
+---
+
+### 8.4 Quick-recall cheat sheet
+
+```
+the gate               → Agent (alias Task) in the coordinator's tools; no tool = no subagent, whatever the prompt says
+gate fixed when        → the session starts (system:init tool list; it names the tool "Task")
+exam wording           → "Task/Agent must be in allowedTools"; in the SDK, allowed_tools only pre-approves
+close the gate (SDK)   → drop "Agent" from tools, or a bare "Agent" in disallowed_tools
+AgentDefinition        → description (how it's chosen) + prompt (system prompt) + tools (scoped to the role)
+web-search subagent    → search tools only; findings carry source URL + title (+ result page)
+document subagent      → file-reading tools only; findings carry document + page number
+finding                → content: claim, analysis | metadata: source_url, document_name, page_number, confidence, retrieved_by
+report parsing         → report = text in a hand-back frame; decode the first JSON object, ignore the rest
+subagent knows         → its own system prompt + the brief; not its registry name, not the coordinator's context
+sequential round       → 2 responses, no overlap, time ≈ sum of both; independent tasks belong in one response
+subtype "success"      → the loop ended normally, NOT that delegation happened (gate off)
+```
+
+---
+
+## 9. How to run it
+
+```bash
+cd 01-Agentic-Architecture-Orchestration/03-Subagent-Invocation-and-Context-Passing
+source .venv/bin/activate        # the folder's venv (claude-agent-sdk 0.2.181)
+python poc1_gate_test.py         # paid: 2 runs (gate on, gate off), 2 query() calls, uses ANTHROPIC_API_KEY from .env
+python poc2_pipeline.py          # paid: POC 2, the handoff and the parallel pipeline
+```
+
+- Both scripts call the API. This folder has no free offline demo.
+- `.env` needs `ANTHROPIC_API_KEY`; copy `.env.example` and fill it in. `MODEL_ID`, `MAX_TURNS` and `MAX_BUDGET_USD` fall back to `claude-sonnet-5-5`, `20` and `1.00`.
+- To see the `unlisted` case (E1), uncomment the third line of `RUNS`. It adds a third paid call.
+- Every model input and output, plus the per-run summary lines, goes to the console and to `logs/poc1_gate_test_<date>_<time>.log`. Expect different wording, confidence levels and timings on each run; the gate result stays the same.
+- The exit code is `0` when both runs finish, even if a report fails to parse (that's logged and skipped). It's `1` on a setup failure or an SDK runtime failure (`ClaudeSDKError`).

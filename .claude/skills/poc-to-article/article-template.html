@@ -398,10 +398,10 @@ blockquote strong:first-child { background: var(--signal); color: var(--surface)
   const kinds = [
     ['k-bad', /error_|ResultError|ClaudeSDKError|^None$|RuntimeError|ValueError|OSError|is_error|max_tokens|eval\(\)|async_launched|\['fusion'\]|^missing$|^partial$|complete: False/],
     ['k-ok', /end_turn|"success"|^success$|well_covered|complete: True/],
-    ['k-cap', /max_turns|max_budget_usd|MAX_TURNS|MAX_BUDGET_USD|MAX_ITERATIONS|max_iterations|COVERAGE_THRESHOLD|readOnlyHint|tools=\[|allowed_tools|setting_sources|ENABLE_TOOL_SEARCH|maxTurns|output_format|output_config|DISABLE_|MODEL_ID|with_agents|inherit|mcp_servers|agents=|^thinking$/],
-    ['k-tool', /tool_use|tool_result|ToolUseBlock|ToolResultBlock|mcp__|calculator|web_search|@tool|_search_backend|_evaluate|^"?Agent"?$|^Task$|StructuredOutput|read_document|subagent_type|^web-searcher$|^doc-analyst$/],
-    ['k-msg', /Message\b|TextBlock|ThinkingBlock|stop_reason|subtype|message\.result|\.result\b|structured_output|^\[(coordinator|web-searcher|doc-analyst)\]$|hand-back|agentId|<usage>/],
-    ['k-fn', /query|ClaudeAgentOptions|build_options|run_agent|load_settings|asyncio|main\(\)|Settings|run_coordinator|research_once|decompose|delegate|build_coordinator_options|missing_categories|log_model_io|setup_logging|text_of|run_subagent|agent_loop|AgentDefinition|create_sdk_mcp_server|COORDINATOR_PROMPT|^AGENTS$|assess_coverage|coverage_percent|merge_sections|^research(\(\))?$/]
+    ['k-cap', /max_turns|max_budget_usd|MAX_TURNS|MAX_BUDGET_USD|MAX_ITERATIONS|max_iterations|COVERAGE_THRESHOLD|readOnlyHint|tools=\[|allowed_tools|setting_sources|ENABLE_TOOL_SEARCH|maxTurns|output_format|output_config|DISABLE_|MODEL_ID|with_agents|inherit|mcp_servers|agents=|^thinking$|agent_tool|approve_agent|SEQUENTIAL_RULE|PARALLEL_RULE/],
+    ['k-tool', /tool_use|tool_result|ToolUseBlock|ToolResultBlock|mcp__|calculator|web_search|@tool|_search_backend|_evaluate|^"?Agent"?$|^Task$|StructuredOutput|read_document|subagent_type|^web-searcher$|^doc-analyst$|^synthesizer$|list_documents/],
+    ['k-msg', /Message\b|TextBlock|ThinkingBlock|stop_reason|subtype|message\.result|\.result\b|structured_output|^\[(coordinator|web-searcher|doc-analyst|synthesizer)\]$|hand-back|agentId|<usage>|init_tools|message_id|system:init/],
+    ['k-fn', /query|ClaudeAgentOptions|build_options|run_agent|load_settings|asyncio|main\(\)|Settings|run_coordinator|research_once|decompose|delegate|build_coordinator_options|missing_categories|log_model_io|setup_logging|text_of|run_subagent|agent_loop|AgentDefinition|create_sdk_mcp_server|COORDINATOR_PROMPT|^AGENTS$|assess_coverage|coverage_percent|merge_sections|^research(\(\))?$|build_pipeline_options|parse_findings|parse_json_object|delegation_timing|coordinator_prompt|strip_metadata|check_metadata_passed|verify_attribution|diagnose/]
   ];
   art.querySelectorAll(':not(pre) > code').forEach(function (c) {
     const t = c.textContent;

@@ -773,7 +773,12 @@ def setup_logging(script_name: str) -> None:
 
 ## 5. Turn-by-turn trace of each run (real output)
 
-Each trace below is the real run from `logs/poc2_refinement_20261027_183353.log` (2026-10-27, 18:33:53 to 18:38:05: 4 min 12 s for all 15 `query()` calls). Long values are trimmed with `...` and wrapped across lines. Each log line points back to the statement that wrote it (section 3.2's table).
+Each trace below is the real run from `logs/poc2_refinement_20261027_183353.log` (2026-10-27, 18:33:53 to 18:38:05: 4 min 12 s for all 15 `query()` calls). Each log line points back to the statement that wrote it (section 3.2's table).
+
+How to read the log blocks:
+- In the log file, every entry is one line. Here, each entry's header (time, `MODEL INPUT` or `MODEL OUTPUT`, kind, `[agent]`) stays on its first line, and its payload is pretty-printed underneath: one key or list item per line.
+- Long text wraps onto a deeper-indented line. A `\n` inside a string ends the line, as it does in the real text.
+- `...` marks text that was cut. A line that starts with `...` summarizes log lines left out, such as a subagent's research calls with what each returned.
 
 ### 5.1 Run `narrow`: start from solar and wind, repair the gaps
 

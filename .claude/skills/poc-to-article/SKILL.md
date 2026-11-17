@@ -19,7 +19,7 @@ Project root: `/mnt/CC0E50740E505992/claude-cert/ccar-f`.
 - **The POC path the user passes is the only code source and the highest priority.** Read, explain and quote code only from that script/folder and the local modules it imports from the same folder. Never look up, compare with or copy from another copy of the POC elsewhere in the project — in particular nothing under `raw-poc/` (unless the user's own path is there). This overrides any earlier article, memory note or habit that says snippets come from `raw-poc/`.
 - Remaining tokens = the **log file(s)** for the real run. Paths are relative to the project root or absolute. Match each log to its script by the `<script stem>_` filename prefix. For a folder, every entry-point script needs a log: list script → log pairs and stop if any script has none. A path or log that doesn't exist, or a log whose prefix matches no script → stop and say which.
 - Output: `<script stem>-article.md` in the **same folder** as the script (e.g. `poc2_agent_loop.py` → `poc2_agent_loop-article.md`). If it exists, say so and ask before overwriting.
-- Also publish the article as a styled HTML Artifact (section 5).
+- Also publish the article as a styled HTML Artifact (section 5), put the artifact link in the article's header, and save the published page as `<script stem>-article.html` in the same folder.
 - Edit nothing else. Never run the POC (it calls the paid API) unless the user asks.
 
 ## 1. Gather (read, don't guess)
@@ -41,7 +41,7 @@ Only cite fields the log contains. Do not invent `num_turns`, cost, session ids,
 
 ## 3. Article structure (in this order)
 
-Header block: file, domain → topic, SDK version.
+Header block: file, domain → topic, SDK version, and the artifact page link (`> **Page:** ...`, see section 5).
 
 1. **What this POC proves** — table: idea → where in the code. Plus a one-line diagram of the loop/pattern.
 2. **The files involved** — tree + one line per file on its responsibility (configuration / capabilities / orchestration).
@@ -86,8 +86,23 @@ After the `.md` is written, turn it into a reading page and publish it as an Art
 
 - Load the `artifact-design` skill before publishing, then publish the built file with icon `code` and a one-sentence description. Put the built HTML in the session scratchpad, not in the project folder. When an article is re-run, republish to the same artifact URL if it's known.
 
+**Artifact link in the `.md`:** the article's header blockquote gets a fourth line after File / Domain / SDK:
+
+```markdown
+> **Page:** https://claude.ai/artifact/<id>
+```
+
+- **URL already known** (a re-run): add the line before you build, then build and publish once to that URL.
+- **First publish:** build and publish without the line. Then add the line with the URL from the publish result, rebuild, and republish the same scratchpad file to that same URL, so the page and the `.md` both carry the link.
+
+**Save the published page next to the article:** after the last publish, download the page and keep it in the POC folder:
+
+1. `Artifact` `read` with `url` = the article's URL, `path: "index.html"` and `out_dir` = the script's folder. It saves the file as `index.html`.
+2. Rename it to `<script stem>-article.html` (e.g. `poc2_agent_loop-article.html`), overwriting any older copy.
+3. Check it's the version you published: the built scratchpad page is contained in the download, and its `<title>` is the article's own title.
+
 **What the template does** (keep these features when you edit it):
-- **Hero:** the `# H1` is split at its first `: ` into an eyebrow pill (`POC 2b:`) and a gradient title. The header blockquote (File / Domain / SDK) becomes three colour pills. A soft glow sits behind the hero, plus an orbiting-dot ornament (hidden on mobile).
+- **Hero:** the `# H1` is split at its first `: ` into an eyebrow pill (`POC 2b:`) and a gradient title. The header blockquote (File / Domain / SDK) becomes three colour pills; the `Page:` line adds a fourth pill in the default style, with the link clickable. A soft glow sits behind the hero, plus an orbiting-dot ornament (hidden on mobile).
 - **One colour per `##` section,** cycling cobalt, violet, teal, rose, amber, green (light and dark tokens `--c1`…`--c6`). Each section uses its colour for the gradient bar above the heading, the pill around the section number, `###` number pills, `####` headings as pills, list markers, table headers and alternate-row shading, numbered lists drawn as pill counters, and the matching dot in the contents list.
 - **No highlighter behind bold text.** The user had this removed; don't bring it back.
 - **Inline `code` as pills, coloured by meaning:**
@@ -108,4 +123,4 @@ The template relies on the article structure in section 3: `# POC …: Title`, a
 
 ## 6. Report
 
-Reply with: the article path, the artifact link, a short section list, any claim the log corrected, which log file was used, and anything in the folder that looked off.
+Reply with: the article path, the artifact link, the path of the downloaded `.html`, a short section list, any claim the log corrected, which log file was used, and anything in the folder that looked off.
